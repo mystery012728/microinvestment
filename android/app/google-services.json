@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "241983748173",
+    "project_id": "microinvestment-7bbb4",
+    "storage_bucket": "microinvestment-7bbb4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:241983748173:android:c348b39a142c78d4e1c404",
+        "android_client_info": {
+          "package_name": "com.example.microinvestment"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBRkFfZoxl9GfRF6oJ6oiEL89Tf3w5qfMM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
