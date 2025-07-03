@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/asset.dart';
 import '../providers/portfolio_provider.dart';
-import '../services/api_service.dart';
+import '../services/real_time_api_service.dart';
 
 class AddAssetDialog extends StatefulWidget {
   const AddAssetDialog({super.key});
@@ -17,215 +17,640 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   final _formKey = GlobalKey<FormState>();
   final _symbolController = TextEditingController();
   final _quantityController = TextEditingController();
-  final _buyPriceController = TextEditingController();
-  
+  final _scrollController = ScrollController();
+
   AssetType _selectedType = AssetType.stock;
   bool _isLoading = false;
+  bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
   String? _selectedAssetName;
+  double? _currentPrice;
+  String? _selectedMarket;
 
   @override
   void dispose() {
     _symbolController.dispose();
     _quantityController.dispose();
-    _buyPriceController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final maxHeight = screenHeight * 0.9;
+    final maxWidth = screenWidth > 600 ? 500.0 : screenWidth * 0.95;
+
     return Dialog(
+      insetPadding: const EdgeInsets.all(16),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 600),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Add Asset',
-                  style: Theme.of(context).textTheme.headlineSmall,
+        width: maxWidth,
+        constraints: BoxConstraints(
+          maxHeight: maxHeight,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Fixed Header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
                 ),
-                const SizedBox(height: 24),
-
-                // Asset Type Selection
-                Text(
-                  'Asset Type',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<AssetType>(
-                  segments: AssetType.values.map((type) {
-                    return ButtonSegment<AssetType>(
-                      value: type,
-                      label: Text(type.displayName),
-                      icon: Text(type.icon),
-                    );
-                  }).toList(),
-                  selected: {_selectedType},
-                  onSelectionChanged: (Set<AssetType> selection) {
-                    setState(() {
-                      _selectedType = selection.first;
-                      _searchResults.clear();
-                      _selectedAssetName = null;
-                    });
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Symbol Search
-                TextFormField(
-                  controller: _symbolController,
-                  decoration: const InputDecoration(
-                    labelText: 'Symbol',
-                    hintText: 'e.g., AAPL, BTC',
-                    border: OutlineInputBorder(),
+                border: Border(
+                  bottom: BorderSide(
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
                   ),
-                  textCapitalization: TextCapitalization.characters,
-                  onChanged: _searchAssets,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter a symbol';
-                    }
-                    return null;
-                  },
                 ),
-
-                // Search Results
-                if (_searchResults.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    constraints: const BoxConstraints(maxHeight: 150),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Theme.of(context).colorScheme.outline),
-                      borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.add_shopping_cart,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Add Asset',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: _searchResults.length,
-                      itemBuilder: (context, index) {
-                        final result = _searchResults[index];
-                        return ListTile(
-                          dense: true,
-                          title: Text(result['symbol']),
-                          subtitle: Text(result['name']),
-                          onTap: () {
-                            _symbolController.text = result['symbol'];
-                            _selectedAssetName = result['name'];
-                            setState(() {
-                              _searchResults.clear();
-                            });
-                          },
-                        );
-                      },
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
                     ),
                   ),
                 ],
-
-                const SizedBox(height: 16),
-
-                // Quantity
-                TextFormField(
-                  controller: _quantityController,
-                  decoration: const InputDecoration(
-                    labelText: 'Quantity',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-                  ],
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter quantity';
-                    }
-                    final quantity = double.tryParse(value);
-                    if (quantity == null || quantity <= 0) {
-                      return 'Please enter a valid quantity';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Buy Price
-                TextFormField(
-                  controller: _buyPriceController,
-                  decoration: const InputDecoration(
-                    labelText: 'Buy Price (\$)',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-                  ],
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter buy price';
-                    }
-                    final price = double.tryParse(value);
-                    if (price == null || price <= 0) {
-                      return 'Please enter a valid price';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 24),
-
-                // Buttons
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : _addAsset,
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Add Asset'),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
-          ),
+
+            // Scrollable Content
+            Flexible(
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.all(24),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Asset Type Selection
+                      Text(
+                        'Asset Type',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<AssetType>(
+                          segments: AssetType.values.map((type) {
+                            return ButtonSegment<AssetType>(
+                              value: type,
+                              label: FittedBox(
+                                child: Text(
+                                  type.displayName,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                              icon: Text(type.icon, style: const TextStyle(fontSize: 16)),
+                            );
+                          }).toList(),
+                          selected: {_selectedType},
+                          onSelectionChanged: (Set<AssetType> selection) {
+                            setState(() {
+                              _selectedType = selection.first;
+                              _searchResults.clear();
+                              _selectedAssetName = null;
+                              _currentPrice = null;
+                              _selectedMarket = null;
+                              _symbolController.clear();
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Symbol Search
+                      Text(
+                        'Search Asset',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _symbolController,
+                        decoration: InputDecoration(
+                          labelText: 'Symbol or Company Name',
+                          hintText: _getHintText(),
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _isSearching
+                              ? const Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                              : null,
+                        ),
+                        textCapitalization: TextCapitalization.characters,
+                        onChanged: _searchAssets,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a symbol';
+                          }
+                          if (_currentPrice == null) {
+                            return 'Please select a valid asset from search results';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      // Search Results
+                      if (_searchResults.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Search Results',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          constraints: const BoxConstraints(maxHeight: 200),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: _searchResults.length,
+                            separatorBuilder: (context, index) => Divider(
+                              height: 1,
+                              color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+                            ),
+                            itemBuilder: (context, index) {
+                              final result = _searchResults[index];
+                              return ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                leading: Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primaryContainer,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      _getTypeIcon(result['type']),
+                                      style: const TextStyle(fontSize: 16),
+                                    ),
+                                  ),
+                                ),
+                                title: Text(
+                                  result['symbol'],
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      result['name'],
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context).colorScheme.primary,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            result['market'],
+                                            style: TextStyle(
+                                              color: Theme.of(context).colorScheme.onPrimary,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          result['type'].toUpperCase(),
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                onTap: () => _selectAsset(result),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+
+                      // Current Price Display
+                      if (_currentPrice != null) ...[
+                        const SizedBox(height: 24),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Theme.of(context).colorScheme.primaryContainer,
+                                Theme.of(context).colorScheme.primaryContainer.withOpacity(0.7),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).colorScheme.primary,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      Icons.trending_up,
+                                      color: Theme.of(context).colorScheme.onPrimary,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Current Market Price',
+                                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                            color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '\$${_currentPrice!.toStringAsFixed(2)}',
+                                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                            color: Theme.of(context).colorScheme.primary,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.info_outline,
+                                      size: 16,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Asset will be purchased at current market price',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 24),
+
+                      // Quantity Input
+                      Text(
+                        'Quantity',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _quantityController,
+                        decoration: const InputDecoration(
+                          labelText: 'Number of shares/units',
+                          hintText: 'Enter quantity to purchase',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.numbers),
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                        ],
+                        onChanged: (value) {
+                          setState(() {}); // Trigger rebuild for total calculation
+                        },
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter quantity';
+                          }
+                          final quantity = double.tryParse(value);
+                          if (quantity == null || quantity <= 0) {
+                            return 'Please enter a valid quantity';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      // Total Investment Display
+                      if (_currentPrice != null && _quantityController.text.isNotEmpty) ...[
+                        const SizedBox(height: 20),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surfaceVariant,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Price per unit:',
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                    ),
+                                  ),
+                                  Text(
+                                    '\$${_currentPrice!.toStringAsFixed(2)}',
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Quantity:',
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                                    ),
+                                  ),
+                                  Text(
+                                    _quantityController.text,
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const Divider(height: 20),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Total Investment:',
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    '\$${_calculateTotalInvestment().toStringAsFixed(2)}',
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 32),
+
+                      // Action Buttons
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton.icon(
+                              onPressed: _isLoading || _currentPrice == null ? null : _addAsset,
+                              icon: _isLoading
+                                  ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                                  : const Icon(Icons.shopping_cart),
+                              label: Text(_isLoading ? 'Processing...' : 'Buy Asset'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Bottom padding to prevent overflow
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  String _getHintText() {
+    switch (_selectedType) {
+      case AssetType.stock:
+        return 'e.g., AAPL, RELIANCE, TCS';
+      case AssetType.crypto:
+        return 'e.g., BTC, ETH, ADA';
+      case AssetType.etf:
+        return 'e.g., SPY, QQQ, VTI';
+    }
+  }
+
+  String _getTypeIcon(String type) {
+    switch (type.toLowerCase()) {
+      case 'crypto':
+        return '₿';
+      case 'stock':
+        return '📈';
+      case 'etf':
+        return '📊';
+      default:
+        return '💰';
+    }
+  }
+
+  double _calculateTotalInvestment() {
+    final quantity = double.tryParse(_quantityController.text) ?? 0;
+    return quantity * (_currentPrice ?? 0);
   }
 
   Future<void> _searchAssets(String query) async {
     if (query.length < 2) {
       setState(() {
         _searchResults.clear();
+        _currentPrice = null;
+        _selectedAssetName = null;
+        _selectedMarket = null;
       });
       return;
     }
 
+    setState(() {
+      _isSearching = true;
+    });
+
     try {
-      final results = await ApiService.searchAssets(query);
+      final results = await RealTimeApiService.searchAssets(query);
       setState(() {
-        _searchResults = results.where((result) => 
-          result['type'] == _selectedType.name ||
-          (_selectedType == AssetType.crypto && result['type'] == 'crypto') ||
-          (_selectedType == AssetType.stock && (result['type'] == 'stock' || result['type'] == 'etf'))
-        ).take(5).toList();
+        _searchResults = results.where((result) =>
+        result['type'] == _selectedType.name ||
+            (_selectedType == AssetType.crypto && result['type'] == 'crypto') ||
+            (_selectedType == AssetType.stock && (result['type'] == 'stock' || result['type'] == 'etf'))
+        ).take(10).toList();
+        _isSearching = false;
       });
     } catch (e) {
-      // Handle search error silently
       setState(() {
         _searchResults.clear();
+        _isSearching = false;
       });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Search failed: $e'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _selectAsset(Map<String, dynamic> asset) async {
+    setState(() {
+      _symbolController.text = asset['symbol'];
+      _selectedAssetName = asset['name'];
+      _selectedMarket = asset['market'];
+      _searchResults.clear();
+      _isLoading = true;
+    });
+
+    try {
+      double price;
+      if (asset['market'] == 'NSE' || asset['market'] == 'BSE') {
+        price = await RealTimeApiService.getIndianStockPrice(asset['symbol']);
+      } else if (asset['type'] == 'crypto') {
+        price = await RealTimeApiService.getCryptoPrice(asset['symbol']);
+      } else {
+        price = await RealTimeApiService.getUSStockPrice(asset['symbol']);
+      }
+
+      setState(() {
+        _currentPrice = price;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _currentPrice = null;
+        _isLoading = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to fetch price: $e'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
     }
   }
 
@@ -239,10 +664,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     try {
       final symbol = _symbolController.text.toUpperCase();
       final quantity = double.parse(_quantityController.text);
-      final buyPrice = double.parse(_buyPriceController.text);
-
-      // Get current price
-      final currentPrice = await ApiService.getAssetPrice(symbol);
+      final currentPrice = _currentPrice!;
 
       final asset = Asset(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -250,7 +672,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
         name: _selectedAssetName ?? symbol,
         type: _selectedType,
         quantity: quantity,
-        buyPrice: buyPrice,
+        buyPrice: currentPrice,
         currentPrice: currentPrice,
         purchaseDate: DateTime.now(),
       );
@@ -258,11 +680,46 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
       if (mounted) {
         await context.read<PortfolioProvider>().addAsset(asset);
         Navigator.of(context).pop();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('${asset.symbol} purchased successfully!'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'View Portfolio',
+              textColor: Colors.white,
+              onPressed: () {
+                // Navigate to portfolio screen if needed
+              },
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add asset: $e')),
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Failed to purchase asset: $e'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } finally {

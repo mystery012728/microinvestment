@@ -8,6 +8,7 @@ import '../widgets/portfolio_summary_card.dart';
 import '../widgets/asset_list_item.dart';
 import '../widgets/add_asset_dialog.dart';
 import '../widgets/portfolio_chart.dart';
+import '../widgets/sell_asset_dialog.dart';
 
 class PortfolioScreen extends StatelessWidget {
   const PortfolioScreen({super.key});
@@ -44,85 +45,71 @@ class PortfolioScreen extends StatelessWidget {
 
           return RefreshIndicator(
             onRefresh: provider.refreshPortfolio,
-            child: CustomScrollView(
-              slivers: [
-                // Portfolio Summary
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: PortfolioSummaryCard(
-                      totalValue: provider.totalValue,
-                      totalInvested: provider.totalInvested,
-                      totalGainLoss: provider.totalGainLoss,
-                      totalGainLossPercent: provider.totalGainLossPercent,
-                    ),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Portfolio Summary
+                  PortfolioSummaryCard(
+                    totalValue: provider.totalValue,
+                    totalInvested: provider.totalInvested,
+                    totalGainLoss: provider.totalGainLoss,
+                    totalGainLossPercent: provider.totalGainLossPercent,
                   ),
-                ),
+                  const SizedBox(height: 24),
 
-                // Portfolio Chart
-                if (provider.assets.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Asset Allocation',
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 16),
-                              SizedBox(
-                                height: 200,
-                                child: PortfolioChart(
-                                  assetAllocation: provider.assetAllocation,
-                                ),
-                              ),
-                            ],
-                          ),
+                  // Portfolio Chart
+                  if (provider.assets.isNotEmpty) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Asset Allocation',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 16),
+                            PortfolioChart(
+                              assetAllocation: provider.assetAllocation,
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 24),
+                  ],
 
-                // Assets List
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(
-                      'Your Assets',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
+                  // Assets List
+                  Text(
+                    'Your Assets',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                ),
+                  const SizedBox(height: 16),
 
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
+                  // Assets List with proper spacing
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: provider.assets.length,
+                    separatorBuilder: (context, index) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
                       final asset = provider.assets[index];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                          vertical: 4.0,
-                        ),
-                        child: AssetListItem(
-                          asset: asset,
-                          onTap: () => _showAssetDetails(context, asset),
-                          onDelete: () => _deleteAsset(context, asset),
-                        ),
+                      return AssetListItem(
+                        asset: asset,
+                        onTap: () => _showAssetDetails(context, asset),
+                        onDelete: () => _deleteAsset(context, asset),
                       );
                     },
-                    childCount: provider.assets.length,
                   ),
-                ),
 
-                const SliverToBoxAdapter(
-                  child: SizedBox(height: 100),
-                ),
-              ],
+                  // Bottom padding to prevent overflow
+                  const SizedBox(height: 100),
+                ],
+              ),
             ),
           );
         },
@@ -132,33 +119,37 @@ class PortfolioScreen extends StatelessWidget {
 
   Widget _buildEmptyState(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.pie_chart_outline,
-            size: 80,
-            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No Assets Yet',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add your first investment to start tracking',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.pie_chart_outline,
+              size: 80,
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
             ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => _showAddAssetDialog(context),
-            icon: const Icon(Icons.add),
-            label: const Text('Add Asset'),
-          ),
-        ],
+            const SizedBox(height: 16),
+            Text(
+              'No Assets Yet',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add your first investment to start tracking your portfolio',
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => _showAddAssetDialog(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Add Asset'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -210,9 +201,9 @@ class _AssetDetailsSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      maxChildSize: 0.9,
-      minChildSize: 0.5,
+      initialChildSize: 0.8,
+      maxChildSize: 0.95,
+      minChildSize: 0.6,
       builder: (context, scrollController) {
         return Container(
           decoration: BoxDecoration(
@@ -299,7 +290,7 @@ class _AssetDetailsSheet extends StatelessWidget {
                       asset.totalGainLoss >= 0 ? AppTheme.primaryGreen : AppTheme.primaryRed,
                     ),
                     const SizedBox(height: 24),
-                    
+
                     // Holdings Info
                     Card(
                       child: Padding(
@@ -319,6 +310,43 @@ class _AssetDetailsSheet extends StatelessWidget {
                           ],
                         ),
                       ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Action Buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              _showSellDialog(context, asset);
+                            },
+                            icon: const Icon(Icons.trending_down),
+                            label: const Text('Sell'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              _showAddMoreDialog(context, asset);
+                            },
+                            icon: const Icon(Icons.add),
+                            label: const Text('Buy More'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -382,5 +410,19 @@ class _AssetDetailsSheet extends StatelessWidget {
 
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year}';
+  }
+
+  void _showSellDialog(BuildContext context, Asset asset) {
+    showDialog(
+      context: context,
+      builder: (context) => SellAssetDialog(asset: asset),
+    );
+  }
+
+  void _showAddMoreDialog(BuildContext context, Asset asset) {
+    showDialog(
+      context: context,
+      builder: (context) => const AddAssetDialog(),
+    );
   }
 }

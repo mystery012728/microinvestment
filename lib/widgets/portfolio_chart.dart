@@ -20,21 +20,30 @@ class PortfolioChart extends StatelessWidget {
     final total = assetAllocation.values.fold(0.0, (sum, value) => sum + value);
     final sections = _createPieChartSections(context, total);
 
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          flex: 2,
-          child: PieChart(
-            PieChartData(
-              sections: sections,
-              centerSpaceRadius: 40,
-              sectionsSpace: 2,
-            ),
+        SizedBox(
+          height: 200,
+          child: Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: PieChart(
+                  PieChartData(
+                    sections: sections,
+                    centerSpaceRadius: 50,
+                    sectionsSpace: 2,
+                    startDegreeOffset: -90,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 2,
+                child: _buildLegend(context, total),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildLegend(context, total),
         ),
       ],
     );
@@ -50,22 +59,29 @@ class PortfolioChart extends StatelessWidget {
       Colors.teal,
       Colors.indigo,
       Colors.pink,
+      Colors.cyan,
+      Colors.amber,
     ];
 
-    return assetAllocation.entries.map((entry) {
-      final index = assetAllocation.keys.toList().indexOf(entry.key);
-      final percentage = (entry.value / total) * 100;
-      
+    final sortedEntries = assetAllocation.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return sortedEntries.asMap().entries.map((entry) {
+      final index = entry.key;
+      final assetEntry = entry.value;
+      final percentage = (assetEntry.value / total) * 100;
+
       return PieChartSectionData(
-        value: entry.value,
-        title: '${percentage.toStringAsFixed(1)}%',
+        value: assetEntry.value,
+        title: percentage > 5 ? '${percentage.toStringAsFixed(1)}%' : '',
         color: colors[index % colors.length],
-        radius: 50,
+        radius: 60,
         titleStyle: const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.bold,
           color: Colors.white,
         ),
+        titlePositionPercentageOffset: 0.6,
       );
     }).toList();
   }
@@ -80,38 +96,61 @@ class PortfolioChart extends StatelessWidget {
       Colors.teal,
       Colors.indigo,
       Colors.pink,
+      Colors.cyan,
+      Colors.amber,
     ];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: assetAllocation.entries.map((entry) {
-        final index = assetAllocation.keys.toList().indexOf(entry.key);
+    final sortedEntries = assetAllocation.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2.0),
-          child: Row(
-            children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: colors[index % colors.length],
-                  shape: BoxShape.circle,
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: sortedEntries.asMap().entries.map((entry) {
+          final index = entry.key;
+          final assetEntry = entry.value;
+          final percentage = (assetEntry.value / total) * 100;
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4.0),
+            child: Row(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: colors[index % colors.length],
+                    shape: BoxShape.circle,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  entry.key,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        assetEntry.key,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${percentage.toStringAsFixed(1)}%',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }

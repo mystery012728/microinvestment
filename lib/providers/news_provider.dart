@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/news_article.dart';
-import '../services/api_service.dart';
+import '../services/real_time_api_service.dart';
 
 class NewsProvider with ChangeNotifier {
   List<NewsArticle> _articles = [];
@@ -14,6 +14,17 @@ class NewsProvider with ChangeNotifier {
 
   NewsProvider() {
     refreshNews();
+    _startPeriodicRefresh();
+  }
+
+  void _startPeriodicRefresh() {
+    // Refresh news every 5 minutes
+    Future.delayed(const Duration(minutes: 5), () {
+      if (!_isLoading) {
+        refreshNews();
+      }
+      _startPeriodicRefresh();
+    });
   }
 
   Future<void> refreshNews() async {
@@ -22,7 +33,7 @@ class NewsProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      _articles = await ApiService.getFinancialNews();
+      _articles = await RealTimeApiService.getFinancialNews();
     } catch (e) {
       _error = 'Failed to load news: $e';
     } finally {
