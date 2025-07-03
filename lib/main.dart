@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:microinvestment/auth/registration_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -19,10 +20,10 @@ void main() async {
     // Initialize Firebase
     await Firebase.initializeApp(
       options: const FirebaseOptions(
-        apiKey: "AIzaSyBoEfynFgftXEWeTKigDaWS0FK1Zczk1rY",
-        appId: "1:935307424826:android:6ba63ec26bea64438e3103",
-        messagingSenderId: "935307424826",
-        projectId: "wastewisepro",
+        apiKey: "AIzaSyBRkFfZoxl9GfRF6oJ6oiEL89Tf3w5qfMM",
+        appId: "1:241983748173:android:c348b39a142c78d4e1c404",
+        messagingSenderId: "241983748173",
+        projectId: "microinvestment-7bbb4",
       ),
     );
   } catch (e) {
@@ -62,6 +63,7 @@ class MyApp extends StatelessWidget {
             routes: {
               '/main': (context) => const MainScreen(),
               '/auth': (context) => const AuthScreen(),
+              '/register': (context) => const RegistrationScreen(),
             },
           );
         },
@@ -70,7 +72,7 @@ class MyApp extends StatelessWidget {
   }
 
   Widget _getHomeScreen(AuthProvider authProvider) {
-    // Always show splash screen first, then check auth state
+    // Always show splash screen first, then navigate to registration
     return FutureBuilder(
       future: _initializeApp(),
       builder: (context, snapshot) {
@@ -78,8 +80,9 @@ class MyApp extends StatelessWidget {
           return const SplashScreen();
         }
 
+        // Always navigate to registration screen instead of auth screen
         if (!authProvider.isAuthenticated) {
-          return const AuthScreen();
+          return const RegistrationScreen();
         }
 
         return const MainScreen();
