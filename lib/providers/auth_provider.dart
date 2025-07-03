@@ -23,7 +23,7 @@ class AuthProvider with ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       _biometricEnabled = prefs.getBool('biometric_enabled') ?? false;
-      
+
       if (_biometricEnabled) {
         // If biometric is enabled, require authentication
         _isAuthenticated = false;
