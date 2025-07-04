@@ -57,7 +57,21 @@ class MyApp extends StatelessWidget {
             darkTheme: AppTheme.darkTheme,
             themeMode: ThemeMode.system,
             debugShowCheckedModeBanner: false,
-            home: _getHomeScreen(authProvider),
+            home: FutureBuilder(
+              future: Future.delayed(Duration.zero),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done) {
+                  return authProvider.isAuthenticated
+                      ? const SplashScreen(child: MainScreen())
+                      : const SplashScreen(child: RegistrationScreen());
+                }
+                return const Scaffold(
+                  body: Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              },
+            ),
             routes: {
               '/main': (context) => const MainScreen(),
               '/auth': (context) => const AuthScreen(),
@@ -67,29 +81,5 @@ class MyApp extends StatelessWidget {
         },
       ),
     );
-  }
-
-  Widget _getHomeScreen(AuthProvider authProvider) {
-    // Always show splash screen first, then navigate to registration
-    return FutureBuilder(
-      future: _initializeApp(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const SplashScreen();
-        }
-
-        // Always navigate to registration screen instead of auth screen
-        if (!authProvider.isAuthenticated) {
-          return const RegistrationScreen();
-        }
-
-        return const RegistrationScreen();
-      },
-    );
-  }
-
-  Future<void> _initializeApp() async {
-    // Add a small delay to show splash screen
-    await Future.delayed(const Duration(seconds: 2));
   }
 }
