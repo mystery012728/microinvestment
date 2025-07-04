@@ -8,14 +8,12 @@ class RealTimeApiService {
   // API Keys - Replace with your actual API keys
   static const String _alphaVantageApiKey = 'SH48TNN10C7SZ182';
   static const String _finnhubApiKey = 'd1inos1r01qhbuvr5ue0d1inos1r01qhbuvr5ueg';
-  static const String _newsApiKey = '86cf54b70f4341219a3ee9a7779ae2dd';
   static const String _coinGeckoApiKey = 'YOUR_COINGECKO_API_KEY';
 
   // API Endpoints
   static const String _alphaVantageBaseUrl = 'https://www.alphavantage.co/query';
   static const String _finnhubBaseUrl = 'https://finnhub.io/api/v1';
   static const String _coinGeckoBaseUrl = 'https://api.coingecko.com/api/v3';
-  static const String _newsApiBaseUrl = 'https://newsapi.org/v2';
 
   static final Map<String, StreamController<double>> _priceStreams = {};
   static Timer? _priceUpdateTimer;
@@ -337,35 +335,6 @@ class RealTimeApiService {
   }
 
   // Get financial news with better error handling
-  static Future<List<NewsArticle>> getFinancialNews() async {
-    if (!_isValidApiKey(_newsApiKey)) {
-      return _getMockNews();
-    }
-
-    try {
-      final url = '$_newsApiBaseUrl/everything?q=finance OR stock OR investment&sortBy=publishedAt&pageSize=15&apiKey=$_newsApiKey';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final articles = data['articles'] as List<dynamic>? ?? [];
-
-        return articles.map((article) => NewsArticle(
-          id: article['url']?.hashCode.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
-          title: article['title'] ?? 'No Title',
-          description: article['description'] ?? 'No Description',
-          url: article['url'] ?? '',
-          imageUrl: article['urlToImage'] ?? '/placeholder.svg?height=200&width=300',
-          source: article['source']?['name'] ?? 'Unknown',
-          publishedAt: DateTime.tryParse(article['publishedAt'] ?? '') ?? DateTime.now(),
-        )).toList();
-      }
-    } catch (e) {
-      print('News API failed: $e');
-    }
-
-    return _getMockNews();
-  }
 
   // Helper methods (unchanged)
   static bool _isCrypto(String symbol) {

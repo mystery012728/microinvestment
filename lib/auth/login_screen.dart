@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'registration_screen.dart';
+import 'package:microinvestment/screens/main_screen.dart';
+import 'registration_screen.dart';// Add this import
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -118,7 +119,15 @@ class _LoginScreenState extends State<LoginScreen> {
           password: _passwordController.text,
         );
 
-        // Navigation will be handled by StreamBuilder in main.dart
+        // Navigate to MainScreen on successful login
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const MainScreen(),
+            ),
+          );
+        }
       } on FirebaseAuthException catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

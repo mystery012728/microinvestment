@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'login_screen.dart'; // Add this import
 
 class RegistrationScreen extends StatefulWidget {
   const RegistrationScreen({super.key});
@@ -170,7 +171,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.pop(context);
+
+          // Navigate to login screen and remove all previous routes
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                (route) => false,
+          );
         }
       } on FirebaseAuthException catch (e) {
         if (mounted) {
@@ -311,7 +318,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: _isLoading ? null : () {
-                    Navigator.pop(context);
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const LoginScreen(),
+                      ),
+                    );
                   },
                   child: const Text('Already have an account? Login here'),
                 ),

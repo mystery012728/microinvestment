@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../providers/portfolio_provider.dart';
 import '../providers/watchlist_provider.dart';
-import '../providers/news_provider.dart';
 import 'portfolio_screen.dart';
 import 'watchlist_screen.dart';
 import 'news_screen.dart';
@@ -34,8 +33,7 @@ class _MainScreenState extends State<MainScreen> {
     // Initialize providers
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PortfolioProvider>().refreshPortfolio();
-      context.read<WatchlistProvider>().refreshWatchlist();
-      context.read<NewsProvider>().refreshNews();
+
     });
   }
 

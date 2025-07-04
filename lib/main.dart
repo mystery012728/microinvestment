@@ -6,7 +6,6 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'providers/portfolio_provider.dart';
 import 'providers/watchlist_provider.dart';
-import 'providers/news_provider.dart';
 import 'providers/auth_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/auth_screen.dart';
@@ -49,7 +48,6 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => PortfolioProvider()),
         ChangeNotifierProvider(create: (_) => WatchlistProvider()),
-        ChangeNotifierProvider(create: (_) => NewsProvider()),
       ],
       child: Consumer<AuthProvider>(
         builder: (context, authProvider, child) {
@@ -85,7 +83,7 @@ class MyApp extends StatelessWidget {
           return const RegistrationScreen();
         }
 
-        return const MainScreen();
+        return const RegistrationScreen();
       },
     );
   }

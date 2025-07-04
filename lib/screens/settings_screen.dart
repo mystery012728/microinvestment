@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 import '../providers/auth_provider.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -30,24 +29,24 @@ class SettingsScreen extends StatelessWidget {
                           leading: const Icon(Icons.fingerprint),
                           title: const Text('Biometric Authentication'),
                           subtitle: Text(
-                            isSupported 
+                            isSupported
                                 ? (authProvider.biometricEnabled ? 'Enabled' : 'Disabled')
                                 : 'Not supported on this device',
                           ),
                           trailing: isSupported
                               ? Switch(
-                                  value: authProvider.biometricEnabled,
-                                  onChanged: (value) async {
-                                    if (value) {
-                                      final success = await authProvider.authenticateWithBiometrics();
-                                      if (success) {
-                                        await authProvider.enableBiometric();
-                                      }
-                                    } else {
-                                      await authProvider.disableBiometric();
-                                    }
-                                  },
-                                )
+                            value: authProvider.biometricEnabled,
+                            onChanged: (value) async {
+                              if (value) {
+                                final success = await authProvider.authenticateWithBiometrics();
+                                if (success) {
+                                  await authProvider.enableBiometric();
+                                }
+                              } else {
+                                await authProvider.disableBiometric();
+                              }
+                            },
+                          )
                               : null,
                         );
                       },
@@ -166,7 +165,7 @@ class SettingsScreen extends StatelessWidget {
         content: const SingleChildScrollView(
           child: Text(
             'This is a demo investment tracking app. No real financial data is stored or transmitted. '
-            'All data is stored locally on your device and is not shared with third parties.',
+                'All data is stored locally on your device and is not shared with third parties.',
           ),
         ),
         actions: [
@@ -187,8 +186,8 @@ class SettingsScreen extends StatelessWidget {
         content: const SingleChildScrollView(
           child: Text(
             'This is a demo application for educational purposes only. '
-            'Do not use this app for actual investment decisions. '
-            'The developers are not responsible for any financial losses.',
+                'Do not use this app for actual investment decisions. '
+                'The developers are not responsible for any financial losses.',
           ),
         ),
         actions: [
@@ -224,7 +223,7 @@ class SettingsScreen extends StatelessWidget {
         title: const Text('Clear All Data'),
         content: const Text(
           'This will permanently delete all your portfolio data, watchlist, and settings. '
-          'This action cannot be undone.',
+              'This action cannot be undone.',
         ),
         actions: [
           TextButton(
