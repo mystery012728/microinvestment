@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/asset.dart';
 import '../providers/portfolio_provider.dart';
+import '../providers/auth_provider.dart';
 import '../services/real_time_api_service.dart';
 
 class AddAssetDialog extends StatefulWidget {
@@ -42,18 +43,26 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   }
 
   Future<void> _loadWalletBalance() async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) return;
+
     final prefs = await SharedPreferences.getInstance();
+    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
     setState(() {
-      _walletBalance = prefs.getDouble('wallet_balance') ?? 0.0;
+      _walletBalance = prefs.getDouble(userWalletKey) ?? 0.0;
     });
   }
 
   Future<void> _updateWalletBalance(double amount) async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) return;
+
     final prefs = await SharedPreferences.getInstance();
+    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
     setState(() {
       _walletBalance -= amount;
     });
-    await prefs.setDouble('wallet_balance', _walletBalance);
+    await prefs.setDouble(userWalletKey, _walletBalance);
   }
 
   double get _totalInvestment {
@@ -448,6 +457,12 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   Future<void> _addAsset() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) {
+      _showSnackBar('Please log in to add assets', isError: true);
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       final asset = Asset(
@@ -461,8 +476,9 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
         purchaseDate: DateTime.now(),
       );
 
-      // Store in Firebase
+      // Store in Firebase with user UID
       await FirebaseFirestore.instance.collection('buy_details').add({
+        'userId': authProvider.userUid,
         'asset_id': asset.id,
         'symbol': asset.symbol,
         'name': asset.name,

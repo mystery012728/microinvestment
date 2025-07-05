@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/asset.dart';
 import '../providers/portfolio_provider.dart';
+import '../providers/auth_provider.dart';
 import '../services/real_time_api_service.dart';
 
 class SellAssetDialog extends StatefulWidget {
@@ -67,7 +68,11 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
   }
 
   Future<void> _storeSellDetails(double quantity, double saleAmount, double profitLoss) async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) return;
+
     await FirebaseFirestore.instance.collection('sell_details').add({
+      'userId': authProvider.userUid,
       'assetId': widget.asset.id,
       'symbol': widget.asset.symbol,
       'name': widget.asset.name,
@@ -81,15 +86,29 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
     });
   }
 
-  // Fixed wallet balance update method
   Future<void> _updateWalletBalance(double amount) async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) return;
+
     final prefs = await SharedPreferences.getInstance();
-    final currentBalance = prefs.getDouble('wallet_balance') ?? 0.0;
-    await prefs.setDouble('wallet_balance', currentBalance + amount);
+    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
+    final currentBalance = prefs.getDouble(userWalletKey) ?? 0.0;
+    await prefs.setDouble(userWalletKey, currentBalance + amount);
   }
 
   Future<void> _sellAsset() async {
     if (!_formKey.currentState!.validate()) return;
+
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please log in to sell assets'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
 

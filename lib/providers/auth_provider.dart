@@ -9,6 +9,7 @@ class AuthProvider with ChangeNotifier {
   bool _biometricEnabled = false;
   String? _error;
   User? _user;
+  String? _userUid;
 
   final LocalAuthentication _localAuth = LocalAuthentication();
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
@@ -18,6 +19,7 @@ class AuthProvider with ChangeNotifier {
   bool get biometricEnabled => _biometricEnabled;
   String? get error => _error;
   User? get user => _user;
+  String? get userUid => _userUid;
 
   AuthProvider() {
     _checkAuthStatus();
@@ -28,9 +30,11 @@ class AuthProvider with ChangeNotifier {
     _firebaseAuth.authStateChanges().listen((User? user) {
       if (user != null) {
         _user = user;
+        _userUid = user.uid;
         _handleFirebaseAuthSuccess();
       } else {
         _user = null;
+        _userUid = null;
         _isAuthenticated = false;
         notifyListeners();
       }
@@ -44,6 +48,7 @@ class AuthProvider with ChangeNotifier {
 
       // Check if user is already signed in with Firebase
       _user = _firebaseAuth.currentUser;
+      _userUid = _user?.uid;
 
       if (_user != null) {
         // User is signed in with Firebase
@@ -81,6 +86,7 @@ class AuthProvider with ChangeNotifier {
   // Firebase Authentication Methods
   void setUser(User user) {
     _user = user;
+    _userUid = user.uid;
     _handleFirebaseAuthSuccess();
   }
 
@@ -96,6 +102,7 @@ class AuthProvider with ChangeNotifier {
       );
 
       _user = credential.user;
+      _userUid = credential.user?.uid;
       _handleFirebaseAuthSuccess();
       return true;
     } on FirebaseAuthException catch (e) {
@@ -126,6 +133,7 @@ class AuthProvider with ChangeNotifier {
       );
 
       _user = credential.user;
+      _userUid = credential.user?.uid;
       _handleFirebaseAuthSuccess();
       return true;
     } on FirebaseAuthException catch (e) {
@@ -276,6 +284,7 @@ class AuthProvider with ChangeNotifier {
       await _firebaseAuth.signOut();
       _isAuthenticated = false;
       _user = null;
+      _userUid = null;
       notifyListeners();
     } catch (e) {
       _error = 'Sign out failed: $e';

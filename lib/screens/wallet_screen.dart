@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 
 class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key});
@@ -20,13 +22,14 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
   bool _showWithdrawDrawer = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
+  String? _currentUserUid;
 
   @override
   void initState() {
     super.initState();
     _fadeController = AnimationController(duration: const Duration(milliseconds: 800), vsync: this);
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut));
-    _loadWalletData();
+    _getCurrentUser();
   }
 
   @override
@@ -36,43 +39,84 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
     super.dispose();
   }
 
+  void _getCurrentUser() {
+    final authProvider = context.read<AuthProvider>();
+    _currentUserUid = authProvider.userUid;
+
+    if (_currentUserUid != null) {
+      _loadWalletData();
+    } else {
+      // Handle case where user is not logged in
+      _showMessage('Please log in to access your wallet', isError: true);
+    }
+  }
+
   Future<void> _loadWalletData() async {
+    if (_currentUserUid == null) return;
+
     await Future.wait([_loadBalance(), _loadTransactions()]);
     _fadeController.forward();
   }
 
   Future<void> _loadBalance() async {
+    if (_currentUserUid == null) return;
+
     final prefs = await SharedPreferences.getInstance();
-    setState(() => walletBalance = prefs.getDouble('wallet_balance') ?? 0.0);
+    final userWalletKey = 'wallet_balance_$_currentUserUid';
+    setState(() => walletBalance = prefs.getDouble(userWalletKey) ?? 0.0);
   }
 
   Future<void> _saveBalance() async {
+    if (_currentUserUid == null) return;
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('wallet_balance', walletBalance);
+    final userWalletKey = 'wallet_balance_$_currentUserUid';
+    await prefs.setDouble(userWalletKey, walletBalance);
   }
 
-  static Future<double> getCurrentBalance() async {
+  static Future<double> getCurrentBalance(String userUid) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getDouble('wallet_balance') ?? 0.0;
+    final userWalletKey = 'wallet_balance_$userUid';
+    return prefs.getDouble(userWalletKey) ?? 0.0;
   }
 
-  static Future<void> updateBalance(double amount) async {
+  static Future<void> updateBalance(String userUid, double amount) async {
     final prefs = await SharedPreferences.getInstance();
-    final currentBalance = prefs.getDouble('wallet_balance') ?? 0.0;
-    await prefs.setDouble('wallet_balance', currentBalance + amount);
+    final userWalletKey = 'wallet_balance_$userUid';
+    final currentBalance = prefs.getDouble(userWalletKey) ?? 0.0;
+    await prefs.setDouble(userWalletKey, currentBalance + amount);
   }
 
   Future<void> _loadTransactions() async {
+    if (_currentUserUid == null) return;
+
     try {
       final futures = await Future.wait([
-        _firestore.collection('add_money').orderBy('timestamp', descending: true).limit(10).get(),
-        _firestore.collection('withdraw_details').orderBy('timestamp', descending: true).limit(10).get(),
-        _firestore.collection('buy_details').orderBy('timestamp', descending: true).limit(10).get(),
-        _firestore.collection('sell_details').orderBy('sellDate', descending: true).limit(10).get(),
+        _firestore.collection('add_money')
+            .where('userId', isEqualTo: _currentUserUid)
+            .orderBy('timestamp', descending: true)
+            .limit(10)
+            .get(),
+        _firestore.collection('withdraw_details')
+            .where('userId', isEqualTo: _currentUserUid)
+            .orderBy('timestamp', descending: true)
+            .limit(10)
+            .get(),
+        _firestore.collection('buy_details')
+            .where('userId', isEqualTo: _currentUserUid)
+            .orderBy('timestamp', descending: true)
+            .limit(10)
+            .get(),
+        _firestore.collection('sell_details')
+            .where('userId', isEqualTo: _currentUserUid)
+            .orderBy('sellDate', descending: true)
+            .limit(10)
+            .get(),
       ]);
 
       final transactions = <WalletTransaction>[];
 
+      // Add money transactions
       for (var doc in futures[0].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -84,6 +128,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         ));
       }
 
+      // Withdraw transactions
       for (var doc in futures[1].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -95,6 +140,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         ));
       }
 
+      // Buy transactions
       for (var doc in futures[2].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -106,6 +152,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         ));
       }
 
+      // Sell transactions
       for (var doc in futures[3].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -125,6 +172,11 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
   }
 
   Future<void> _processTransaction(bool isAdd) async {
+    if (_currentUserUid == null) {
+      _showMessage('Please log in to perform transactions', isError: true);
+      return;
+    }
+
     final amount = double.tryParse(_amountController.text);
     if (amount == null || amount <= 0) {
       _showMessage('Please enter a valid amount', isError: true);
@@ -138,15 +190,21 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
     setState(() => _isProcessing = true);
     try {
+      // Add transaction to Firestore with user ID
       await _firestore.collection(isAdd ? 'add_money' : 'withdraw_details').add({
+        'userId': _currentUserUid,
         'amount': amount,
         'description': isAdd ? 'Money added to wallet' : 'Money withdrawn from wallet',
         'timestamp': FieldValue.serverTimestamp(),
       });
 
+      // Update local balance
       setState(() => walletBalance += isAdd ? amount : -amount);
       await _saveBalance();
+
+      // Reload transactions to show the new one
       await _loadTransactions();
+
       _closeDrawers();
       _showMessage('${isAdd ? 'Money added' : 'Money withdrawn'} successfully!');
     } catch (e) {
@@ -166,7 +224,11 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
   void _showMessage(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: isError ? Colors.red : Colors.green),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        duration: Duration(seconds: isError ? 4 : 2),
+      ),
     );
   }
 
@@ -296,148 +358,178 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Wallet'),
-        actions: [
-          IconButton(icon: const Icon(Icons.history), onPressed: _showTransactionHistory),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadWalletData),
-        ],
-      ),
-      body: FadeTransition(
-        opacity: _fadeAnimation,
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Theme.of(context).colorScheme.primary,
-                    Theme.of(context).colorScheme.primary.withOpacity(0.8),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
+    // Listen to auth changes
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, child) {
+        // Update current user UID if it changes
+        if (_currentUserUid != authProvider.userUid) {
+          _currentUserUid = authProvider.userUid;
+          if (_currentUserUid != null) {
+            _loadWalletData();
+          }
+        }
+
+        // Show login message if user is not authenticated
+        if (!authProvider.isAuthenticated || _currentUserUid == null) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Wallet')),
+            body: const Center(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.account_balance_wallet, size: 48, color: Colors.white),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Available Balance',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white.withOpacity(0.9)),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '\$${walletBalance.toStringAsFixed(2)}',
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
+                  Icon(Icons.account_balance_wallet, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text('Please log in to access your wallet', style: TextStyle(fontSize: 18)),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              _showAddDrawer = !_showAddDrawer;
-                              _showWithdrawDrawer = false;
-                            });
-                            if (_showAddDrawer) _amountController.clear();
-                          },
-                          icon: Icon(_showAddDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-                          label: const Text('Add Money'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: walletBalance > 0 ? () {
-                            setState(() {
-                              _showWithdrawDrawer = !_showWithdrawDrawer;
-                              _showAddDrawer = false;
-                            });
-                            if (_showWithdrawDrawer) _amountController.clear();
-                          } : null,
-                          icon: Icon(_showWithdrawDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-                          label: const Text('Withdraw'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                        ),
+          );
+        }
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Wallet'),
+            actions: [
+              IconButton(icon: const Icon(Icons.history), onPressed: _showTransactionHistory),
+              IconButton(icon: const Icon(Icons.refresh), onPressed: _loadWalletData),
+            ],
+          ),
+          body: FadeTransition(
+            opacity: _fadeAnimation,
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Theme.of(context).colorScheme.primary,
+                        Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
-                  if (_showAddDrawer) _buildDrawer(true),
-                  if (_showWithdrawDrawer) _buildDrawer(false),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.account_balance_wallet, size: 48, color: Colors.white),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Available Balance',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white.withOpacity(0.9)),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '\$${walletBalance.toStringAsFixed(2)}',
+                        style: Theme.of(context).textTheme.headlineLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    children: [
+                      Row(
                         children: [
-                          Text('Recent Transactions', style: Theme.of(context).textTheme.titleLarge),
-                          TextButton(onPressed: _showTransactionHistory, child: const Text('View All')),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _showAddDrawer = !_showAddDrawer;
+                                  _showWithdrawDrawer = false;
+                                });
+                                if (_showAddDrawer) _amountController.clear();
+                              },
+                              icon: Icon(_showAddDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+                              label: const Text('Add Money'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: walletBalance > 0 ? () {
+                                setState(() {
+                                  _showWithdrawDrawer = !_showWithdrawDrawer;
+                                  _showAddDrawer = false;
+                                });
+                                if (_showWithdrawDrawer) _amountController.clear();
+                              } : null,
+                              icon: Icon(_showWithdrawDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+                              label: const Text('Withdraw'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                    ),
-                    Expanded(
-                      child: _transactions.isEmpty
-                          ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.receipt_long, size: 64, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
-                            const SizedBox(height: 16),
-                            Text('No transactions yet', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
-                          ],
-                        ),
-                      )
-                          : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: _transactions.length > 5 ? 5 : _transactions.length,
-                        itemBuilder: (context, index) => _buildTransactionTile(_transactions[index]),
-                      ),
-                    ),
-                  ],
+                      if (_showAddDrawer) _buildDrawer(true),
+                      if (_showWithdrawDrawer) _buildDrawer(false),
+                    ],
+                  ),
                 ),
-              ),
+                const SizedBox(height: 24),
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    ),
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Recent Transactions', style: Theme.of(context).textTheme.titleLarge),
+                              TextButton(onPressed: _showTransactionHistory, child: const Text('View All')),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: _transactions.isEmpty
+                              ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.receipt_long, size: 64, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
+                                const SizedBox(height: 16),
+                                Text('No transactions yet', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
+                              ],
+                            ),
+                          )
+                              : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: _transactions.length > 5 ? 5 : _transactions.length,
+                            itemBuilder: (context, index) => _buildTransactionTile(_transactions[index]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

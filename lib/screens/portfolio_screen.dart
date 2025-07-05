@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/portfolio_provider.dart';
+import '../providers/auth_provider.dart';
 import '../models/asset.dart';
 import '../utils/theme.dart';
 import '../widgets/portfolio_summary_card.dart';
@@ -28,9 +29,13 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   }
 
   Future<void> _loadWalletBalance() async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) return;
+
     final prefs = await SharedPreferences.getInstance();
+    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
     if (mounted) {
-      setState(() => _walletBalance = prefs.getDouble('wallet_balance') ?? 0.0);
+      setState(() => _walletBalance = prefs.getDouble(userWalletKey) ?? 0.0);
     }
   }
 
