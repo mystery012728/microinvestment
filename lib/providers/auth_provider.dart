@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -200,6 +201,7 @@ class AuthProvider with ChangeNotifier {
       final isDeviceSupported = await _localAuth.isDeviceSupported();
       return isAvailable && isDeviceSupported;
     } catch (e) {
+      debugPrint('Biometric check error: $e');
       return false;
     }
   }
@@ -208,6 +210,7 @@ class AuthProvider with ChangeNotifier {
     try {
       return await _localAuth.getAvailableBiometrics();
     } catch (e) {
+      debugPrint('Get available biometrics error: $e');
       return [];
     }
   }
@@ -221,10 +224,22 @@ class AuthProvider with ChangeNotifier {
         return false;
       }
 
+      // Check if biometric is supported
+      final isSupported = await checkBiometricSupport();
+      if (!isSupported) {
+        _error = 'Biometric authentication is not supported on this device';
+        notifyListeners();
+        return false;
+      }
+
+      // Clear any previous errors
+      _error = null;
+      notifyListeners();
+
       final isAuthenticated = await _localAuth.authenticate(
         localizedReason: 'Please authenticate to access your portfolio',
         options: const AuthenticationOptions(
-          biometricOnly: true,
+          biometricOnly: false, // Allow PIN/Password fallback
           stickyAuth: true,
         ),
       );
@@ -233,9 +248,38 @@ class AuthProvider with ChangeNotifier {
         _isAuthenticated = true;
         _error = null;
         notifyListeners();
+        return true;
+      } else {
+        _error = 'Authentication was cancelled';
+        notifyListeners();
+        return false;
+      }
+    } on PlatformException catch (e) {
+      String errorMessage = 'Authentication failed';
+
+      switch (e.code) {
+        case 'NotAvailable':
+          errorMessage = 'Biometric authentication is not available';
+          break;
+        case 'NotEnrolled':
+          errorMessage = 'No biometric credentials are enrolled';
+          break;
+        case 'LockedOut':
+          errorMessage = 'Biometric authentication is temporarily locked';
+          break;
+        case 'PermanentlyLockedOut':
+          errorMessage = 'Biometric authentication is permanently locked';
+          break;
+        case 'BiometricOnly':
+          errorMessage = 'Biometric authentication required';
+          break;
+        default:
+          errorMessage = 'Authentication failed: ${e.message ?? e.code}';
       }
 
-      return isAuthenticated;
+      _error = errorMessage;
+      notifyListeners();
+      return false;
     } catch (e) {
       _error = 'Authentication failed: $e';
       notifyListeners();
@@ -245,6 +289,14 @@ class AuthProvider with ChangeNotifier {
 
   Future<void> enableBiometric() async {
     try {
+      // Check if biometric is supported before enabling
+      final isSupported = await checkBiometricSupport();
+      if (!isSupported) {
+        _error = 'Biometric authentication is not supported on this device';
+        notifyListeners();
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('biometric_enabled', true);
       _biometricEnabled = true;
@@ -254,6 +306,7 @@ class AuthProvider with ChangeNotifier {
         _isAuthenticated = false;
       }
 
+      _error = null;
       notifyListeners();
     } catch (e) {
       _error = 'Failed to enable biometric: $e';
@@ -272,6 +325,7 @@ class AuthProvider with ChangeNotifier {
         _isAuthenticated = true;
       }
 
+      _error = null;
       notifyListeners();
     } catch (e) {
       _error = 'Failed to disable biometric: $e';
@@ -285,6 +339,7 @@ class AuthProvider with ChangeNotifier {
       _isAuthenticated = false;
       _user = null;
       _userUid = null;
+      _error = null;
       notifyListeners();
     } catch (e) {
       _error = 'Sign out failed: $e';

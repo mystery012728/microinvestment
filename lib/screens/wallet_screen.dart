@@ -20,6 +20,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
   bool _isProcessing = false;
   bool _showAddDrawer = false;
   bool _showWithdrawDrawer = false;
+  bool _bonusClaimed = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   String? _currentUserUid;
@@ -42,25 +43,21 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
   void _getCurrentUser() {
     final authProvider = context.read<AuthProvider>();
     _currentUserUid = authProvider.userUid;
-
     if (_currentUserUid != null) {
       _loadWalletData();
     } else {
-      // Handle case where user is not logged in
       _showMessage('Please log in to access your wallet', isError: true);
     }
   }
 
   Future<void> _loadWalletData() async {
     if (_currentUserUid == null) return;
-
-    await Future.wait([_loadBalance(), _loadTransactions()]);
+    await Future.wait([_loadBalance(), _loadTransactions(), _loadBonusStatus()]);
     _fadeController.forward();
   }
 
   Future<void> _loadBalance() async {
     if (_currentUserUid == null) return;
-
     final prefs = await SharedPreferences.getInstance();
     final userWalletKey = 'wallet_balance_$_currentUserUid';
     setState(() => walletBalance = prefs.getDouble(userWalletKey) ?? 0.0);
@@ -68,10 +65,49 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
   Future<void> _saveBalance() async {
     if (_currentUserUid == null) return;
-
     final prefs = await SharedPreferences.getInstance();
     final userWalletKey = 'wallet_balance_$_currentUserUid';
     await prefs.setDouble(userWalletKey, walletBalance);
+  }
+
+  Future<void> _loadBonusStatus() async {
+    if (_currentUserUid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final bonusKey = 'bonus_claimed_$_currentUserUid';
+    setState(() => _bonusClaimed = prefs.getBool(bonusKey) ?? false);
+  }
+
+  Future<void> _claimBonus() async {
+    if (_currentUserUid == null || _bonusClaimed) return;
+
+    setState(() => _isProcessing = true);
+    try {
+      const bonusAmount = 100000.0;
+
+      // Add bonus transaction to Firestore
+      await _firestore.collection('add_money').add({
+        'userId': _currentUserUid,
+        'amount': bonusAmount,
+        'description': 'Welcome bonus claimed',
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // Update balance
+      setState(() => walletBalance += bonusAmount);
+      await _saveBalance();
+
+      // Mark bonus as claimed
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('bonus_claimed_$_currentUserUid', true);
+      setState(() => _bonusClaimed = true);
+
+      await _loadTransactions();
+      _showMessage('Bonus claimed successfully! \$${bonusAmount.toStringAsFixed(0)} added to your wallet!');
+    } catch (e) {
+      _showMessage('Failed to claim bonus: $e', isError: true);
+    } finally {
+      setState(() => _isProcessing = false);
+    }
   }
 
   static Future<double> getCurrentBalance(String userUid) async {
@@ -92,43 +128,25 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
     try {
       final futures = await Future.wait([
-        _firestore.collection('add_money')
-            .where('userId', isEqualTo: _currentUserUid)
-            .orderBy('timestamp', descending: true)
-            .limit(10)
-            .get(),
-        _firestore.collection('withdraw_details')
-            .where('userId', isEqualTo: _currentUserUid)
-            .orderBy('timestamp', descending: true)
-            .limit(10)
-            .get(),
-        _firestore.collection('buy_details')
-            .where('userId', isEqualTo: _currentUserUid)
-            .orderBy('timestamp', descending: true)
-            .limit(10)
-            .get(),
-        _firestore.collection('sell_details')
-            .where('userId', isEqualTo: _currentUserUid)
-            .orderBy('sellDate', descending: true)
-            .limit(10)
-            .get(),
+        _firestore.collection('add_money').where('userId', isEqualTo: _currentUserUid).orderBy('timestamp', descending: true).limit(10).get(),
+        _firestore.collection('withdraw_details').where('userId', isEqualTo: _currentUserUid).orderBy('timestamp', descending: true).limit(10).get(),
+        _firestore.collection('buy_details').where('userId', isEqualTo: _currentUserUid).orderBy('timestamp', descending: true).limit(10).get(),
+        _firestore.collection('sell_details').where('userId', isEqualTo: _currentUserUid).orderBy('sellDate', descending: true).limit(10).get(),
       ]);
 
       final transactions = <WalletTransaction>[];
 
-      // Add money transactions
       for (var doc in futures[0].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
           id: doc.id,
           type: TransactionType.deposit,
           amount: data['amount']?.toDouble() ?? 0.0,
-          description: 'Money added to wallet',
+          description: data['description'] ?? 'Money added to wallet',
           date: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
         ));
       }
 
-      // Withdraw transactions
       for (var doc in futures[1].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -140,7 +158,6 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         ));
       }
 
-      // Buy transactions
       for (var doc in futures[2].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -152,7 +169,6 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         ));
       }
 
-      // Sell transactions
       for (var doc in futures[3].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -190,7 +206,6 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
     setState(() => _isProcessing = true);
     try {
-      // Add transaction to Firestore with user ID
       await _firestore.collection(isAdd ? 'add_money' : 'withdraw_details').add({
         'userId': _currentUserUid,
         'amount': amount,
@@ -198,11 +213,8 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      // Update local balance
       setState(() => walletBalance += isAdd ? amount : -amount);
       await _saveBalance();
-
-      // Reload transactions to show the new one
       await _loadTransactions();
 
       _closeDrawers();
@@ -358,10 +370,8 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    // Listen to auth changes
     return Consumer<AuthProvider>(
       builder: (context, authProvider, child) {
-        // Update current user UID if it changes
         if (_currentUserUid != authProvider.userUid) {
           _currentUserUid = authProvider.userUid;
           if (_currentUserUid != null) {
@@ -369,7 +379,6 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
           }
         }
 
-        // Show login message if user is not authenticated
         if (!authProvider.isAuthenticated || _currentUserUid == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Wallet')),
@@ -436,6 +445,62 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
                     ],
                   ),
                 ),
+
+                // Bonus Claim Section
+                if (!_bonusClaimed)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Colors.orange, Colors.amber],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.orange.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.card_giftcard, size: 40, color: Colors.white),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Welcome Bonus',
+                                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              const Text(
+                                'Claim your \$100,000 bonus!',
+                                style: TextStyle(color: Colors.white, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton(
+                          onPressed: _isProcessing ? null : _claimBonus,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.orange,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          ),
+                          child: _isProcessing
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('Claim'),
+                        ),
+                      ],
+                    ),
+                  ),
+
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Column(
