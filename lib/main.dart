@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:microinvestment/auth/login_screen.dart';
 import 'package:microinvestment/auth/registration_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
@@ -63,7 +64,7 @@ class MyApp extends StatelessWidget {
                 if (snapshot.connectionState == ConnectionState.done) {
                   return authProvider.isAuthenticated
                       ? const SplashScreen(child: MainScreen())
-                      : const SplashScreen(child: RegistrationScreen());
+                      : const SplashScreen(child: LoginScreen());
                 }
                 return const Scaffold(
                   body: Center(
@@ -75,7 +76,7 @@ class MyApp extends StatelessWidget {
             routes: {
               '/main': (context) => const MainScreen(),
               '/auth': (context) => const AuthScreen(),
-              '/register': (context) => const RegistrationScreen(),
+              '/register': (context) => const LoginScreen(),
             },
           );
         },

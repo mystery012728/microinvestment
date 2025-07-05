@@ -10,8 +10,7 @@ class RegistrationScreen extends StatefulWidget {
   State<RegistrationScreen> createState() => _RegistrationScreenState();
 }
 
-class _RegistrationScreenState extends State<RegistrationScreen>
-    with TickerProviderStateMixin {
+class _RegistrationScreenState extends State<RegistrationScreen> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -21,49 +20,25 @@ class _RegistrationScreenState extends State<RegistrationScreen>
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
 
-  late AnimationController _animationController;
-  late AnimationController _buttonController;
+  String? _usernameError;
+  String? _emailError;
+  String? _passwordError;
+  String? _confirmPasswordError;
+
+  late AnimationController _controller;
   late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _logoScaleAnimation;
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      duration: const Duration(milliseconds: 1000),
-      vsync: this,
-    );
-    _buttonController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
+    _controller = AnimationController(duration: const Duration(milliseconds: 800), vsync: this);
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _controller.forward();
 
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOut,
-    ));
-
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOutCubic,
-    ));
-
-    _logoScaleAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: const Interval(0.2, 0.8, curve: Curves.elasticOut),
-    ));
-
-    _animationController.forward();
+    _usernameController.addListener(_validateUsernameRealTime);
+    _emailController.addListener(_validateEmailRealTime);
+    _passwordController.addListener(_validatePasswordRealTime);
+    _confirmPasswordController.addListener(_validateConfirmPasswordRealTime);
   }
 
   @override
@@ -72,220 +47,159 @@ class _RegistrationScreenState extends State<RegistrationScreen>
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _animationController.dispose();
-    _buttonController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
-  // Theme-responsive colors
-  Color get _primaryAccent => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFFFFD700)
-      : const Color(0xFF1E40AF);
+  void _validateUsernameRealTime() {
+    String value = _usernameController.text;
+    String? error;
 
-  Color get _secondaryAccent => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFFFFA500)
-      : const Color(0xFF3B82F6);
+    if (value.isNotEmpty) {
+      if (value.contains(' ')) {
+        error = 'Username cannot contain spaces';
+      } else if (!RegExp(r'^[a-z0-9@]+$').hasMatch(value)) {
+        error = 'Only lowercase letters, numbers, and @ allowed';
+      } else if (value.length < 3) {
+        error = 'Username must be at least 3 characters';
+      }
+    }
 
-  Color get _textPrimary => Theme.of(context).brightness == Brightness.dark
-      ? Colors.white
-      : const Color(0xFF1F2937);
+    if (_usernameError != error) {
+      setState(() => _usernameError = error);
+    }
+  }
 
-  Color get _textSecondary => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF8B9DC3)
-      : const Color(0xFF6B7280);
+  void _validateEmailRealTime() {
+    String value = _emailController.text;
+    String? error;
 
-  Color get _backgroundPrimary => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF0A0E1A)
-      : const Color(0xFFF8FAFC);
+    if (value.isNotEmpty && !RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$').hasMatch(value)) {
+      error = 'Please enter a valid email address';
+    }
 
-  Color get _backgroundSecondary => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF1A1F2E)
-      : Colors.white;
+    if (_emailError != error) {
+      setState(() => _emailError = error);
+    }
+  }
 
-  Color get _borderColor => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF2A2F3E)
-      : const Color(0xFFE5E7EB);
+  void _validatePasswordRealTime() {
+    String value = _passwordController.text;
+    String? error;
 
-  Color get _errorColor => const Color(0xFFEF4444);
-  Color get _successColor => const Color(0xFF10B981);
+    if (value.isNotEmpty) {
+      if (value.length < 8) {
+        error = 'Password must be at least 8 characters';
+      } else if (!RegExp(r'[A-Z]').hasMatch(value)) {
+        error = 'Must contain uppercase letter';
+      } else if (!RegExp(r'[a-z]').hasMatch(value)) {
+        error = 'Must contain lowercase letter';
+      } else if (!RegExp(r'[0-9]').hasMatch(value)) {
+        error = 'Must contain number';
+      } else if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) {
+        error = 'Must contain special character';
+      }
+    }
+
+    if (_passwordError != error) {
+      setState(() => _passwordError = error);
+    }
+
+    if (_confirmPasswordController.text.isNotEmpty) {
+      _validateConfirmPasswordRealTime();
+    }
+  }
+
+  void _validateConfirmPasswordRealTime() {
+    String value = _confirmPasswordController.text;
+    String? error;
+
+    if (value.isNotEmpty && value != _passwordController.text) {
+      error = 'Passwords do not match';
+    }
+
+    if (_confirmPasswordError != error) {
+      setState(() => _confirmPasswordError = error);
+    }
+  }
 
   String? _validateUsername(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Username is required';
-    }
-    final RegExp regex = RegExp(r'^[a-z0-9@]+$');
-    if (!regex.hasMatch(value)) {
-      return 'Username can only contain lowercase letters, numbers, and @';
-    }
-    if (value.contains(' ')) {
-      return 'Username cannot contain spaces';
-    }
-    if (value.length < 3) {
-      return 'Username must be at least 3 characters long';
-    }
-    return null;
+    if (value?.isEmpty ?? true) return 'Username is required';
+    return _usernameError;
   }
 
   String? _validateEmail(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Email is required';
-    }
-    final RegExp emailRegex = RegExp(
-      r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-    );
-    if (!emailRegex.hasMatch(value)) {
-      return 'Please enter a valid email address';
-    }
-    return null;
+    if (value?.isEmpty ?? true) return 'Email is required';
+    return _emailError;
   }
 
   String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password is required';
-    }
-    if (value.length < 8) {
-      return 'Password must be at least 8 characters long';
-    }
-    if (!value.contains(RegExp(r'[A-Z]'))) {
-      return 'Password must contain at least one uppercase letter';
-    }
-    if (!value.contains(RegExp(r'[a-z]'))) {
-      return 'Password must contain at least one lowercase letter';
-    }
-    if (!value.contains(RegExp(r'[0-9]'))) {
-      return 'Password must contain at least one number';
-    }
-    if (!value.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'))) {
-      return 'Password must contain at least one special character';
-    }
-    return null;
+    if (value?.isEmpty ?? true) return 'Password is required';
+    return _passwordError;
   }
 
   String? _validateConfirmPassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Please confirm your password';
-    }
-    if (value != _passwordController.text) {
-      return 'Passwords do not match';
-    }
-    return null;
-  }
-
-  String _getAuthErrorMessage(String code) {
-    switch (code) {
-      case 'email-already-in-use':
-        return 'Email is already registered';
-      case 'weak-password':
-        return 'Password is too weak';
-      case 'invalid-email':
-        return 'Invalid email address';
-      case 'operation-not-allowed':
-        return 'Email/password accounts are not enabled';
-      default:
-        return 'Registration failed. Please try again';
-    }
+    if (value?.isEmpty ?? true) return 'Please confirm your password';
+    return _confirmPasswordError;
   }
 
   Future<void> _register() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final usernameQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username', isEqualTo: _usernameController.text.trim())
+          .get();
+
+      if (usernameQuery.docs.isNotEmpty) throw Exception('Username already exists');
+
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      await FirebaseFirestore.instance.collection('users').doc(credential.user!.uid).set({
+        'username': _usernameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'uid': credential.user!.uid,
+        'createdAt': FieldValue.serverTimestamp(),
       });
-      _buttonController.forward();
 
-      try {
-        final usernameQuery = await FirebaseFirestore.instance
-            .collection('users')
-            .where('username', isEqualTo: _usernameController.text.trim())
-            .get();
+      await FirebaseAuth.instance.signOut();
 
-        if (usernameQuery.docs.isNotEmpty) {
-          throw Exception('Username already exists');
-        }
-
-        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
+      if (mounted) {
+        _showSnackBar('Account created successfully! Please sign in.', false);
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (context, animation, _) => const LoginScreen(),
+            transitionsBuilder: (context, animation, _, child) =>
+                FadeTransition(opacity: animation, child: child),
+          ),
         );
-
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(credential.user!.uid)
-            .set({
-          'username': _usernameController.text.trim(),
-          'email': _emailController.text.trim(),
-          'uid': credential.user!.uid,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        await FirebaseAuth.instance.signOut();
-
-        if (mounted) {
-          _showSuccessSnackBar('Account created successfully! Please sign in.');
-          Navigator.pushAndRemoveUntil(
-            context,
-            PageRouteBuilder(
-              pageBuilder: (context, animation, secondaryAnimation) =>
-              const LoginScreen(),
-              transitionsBuilder:
-                  (context, animation, secondaryAnimation, child) {
-                return FadeTransition(opacity: animation, child: child);
-              },
-            ),
-                (route) => false,
-          );
-        }
-      } on FirebaseAuthException catch (e) {
-        if (mounted) {
-          _showErrorSnackBar(_getAuthErrorMessage(e.code));
-        }
-      } catch (e) {
-        if (mounted) {
-          _showErrorSnackBar(e.toString().replaceAll('Exception: ', ''));
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-          _buttonController.reverse();
-        }
       }
+    } catch (e) {
+      if (mounted) _showSnackBar(e.toString().replaceAll('Exception: ', ''), true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showErrorSnackBar(String message) {
+  void _showSnackBar(String message, bool isError) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
-            Icon(Icons.error_outline, color: _textPrimary),
+            Icon(isError ? Icons.error_outline : Icons.check_circle_outline),
             const SizedBox(width: 8),
-            Expanded(child: Text(message, style: TextStyle(color: _textPrimary))),
+            Expanded(child: Text(message)),
           ],
         ),
-        backgroundColor: _errorColor,
+        backgroundColor: isError ? Colors.red : Colors.green,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
-  }
-
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.check_circle_outline, color: _textPrimary),
-            const SizedBox(width: 8),
-            Expanded(child: Text(message, style: TextStyle(color: _textPrimary))),
-          ],
-        ),
-        backgroundColor: _successColor,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        margin: const EdgeInsets.all(16),
       ),
     );
   }
@@ -295,381 +209,231 @@ class _RegistrationScreenState extends State<RegistrationScreen>
     required String label,
     required IconData icon,
     required String? Function(String?) validator,
+    required String? realTimeError,
     bool obscureText = false,
     Widget? suffixIcon,
-    TextInputAction textInputAction = TextInputAction.next,
-    VoidCallback? onFieldSubmitted,
-    String? helperText,
     TextInputType keyboardType = TextInputType.text,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextFormField(
-          controller: controller,
-          validator: validator,
-          obscureText: obscureText,
-          textInputAction: textInputAction,
-          keyboardType: keyboardType,
-          onFieldSubmitted: onFieldSubmitted != null ? (_) => onFieldSubmitted() : null,
-          enabled: !_isLoading,
-          style: TextStyle(fontSize: 16, color: _textPrimary),
-          decoration: InputDecoration(
-            labelText: label,
-            prefixIcon: Icon(icon, color: _primaryAccent, size: 22),
-            suffixIcon: suffixIcon,
-            filled: true,
-            fillColor: _backgroundSecondary,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: _borderColor),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: _borderColor),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: _primaryAccent, width: 2),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: _errorColor),
-            ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: _errorColor, width: 2),
-            ),
-            labelStyle: TextStyle(color: _textSecondary),
-            errorStyle: TextStyle(color: _errorColor),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          ),
+    final hasError = realTimeError != null;
+
+    return TextFormField(
+      controller: controller,
+      validator: validator,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      enabled: !_isLoading,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, color: hasError ? Colors.red : Theme.of(context).colorScheme.primary),
+        suffixIcon: suffixIcon,
+        filled: true,
+        fillColor: Theme.of(context).colorScheme.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: hasError ? Colors.red : Theme.of(context).colorScheme.outline),
         ),
-        if (helperText != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            helperText,
-            style: TextStyle(
-              fontSize: 12,
-              color: _textSecondary,
-            ),
-          ),
-        ],
-      ],
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: hasError ? Colors.red : Theme.of(context).colorScheme.outline),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: hasError ? Colors.red : Theme.of(context).colorScheme.primary, width: 2),
+        ),
+        errorText: realTimeError,
+        errorStyle: const TextStyle(color: Colors.red),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final upperHeight = screenHeight * 0.4; // 4:3 ratio approximation
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: _backgroundPrimary,
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: isDark
-                ? [
-              const Color(0xFF0A0E1A),
-              const Color(0xFF1A1F2E),
-              const Color(0xFF2A2F3E),
-            ]
-                : [
-              const Color(0xFFF8FAFC),
-              const Color(0xFFE2E8F0),
-              const Color(0xFFCBD5E1),
+            colors: [
+              Theme.of(context).colorScheme.primary,
+              Theme.of(context).colorScheme.primary.withOpacity(0.8),
             ],
           ),
         ),
         child: SafeArea(
-          child: Column(
-            children: [
-              // Upper portion (4:3 ratio) - GIF/Animation area
-              Container(
-                height: upperHeight,
-                width: double.infinity,
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: Column(
+              children: [
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.35,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Investment logo with animation
-                      AnimatedBuilder(
-                        animation: _logoScaleAnimation,
-                        builder: (context, child) {
-                          return Transform.scale(
-                            scale: _logoScaleAnimation.value,
-                            child: Container(
-                              width: 120,
-                              height: 120,
-                              child: Center(
-                                child: Image.asset(
-                                  'icon/investment.png',
-                                  width: 120,
-                                  height: 120,
-                                  fit: BoxFit.contain,
-                                  filterQuality: FilterQuality.high,
-                                  isAntiAlias: true,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Icon(
-                                      Icons.account_balance,
-                                      color: isDark ? const Color(0xFF0A0E1A) : Colors.white,
-                                      size: 60,
-                                    );
-                                  },
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      SlideTransition(
-                        position: _slideAnimation,
-                        child: Column(
-                          children: [
-                            Text(
-                              'CREATE ACCOUNT',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: _textPrimary,
-                                letterSpacing: 1.5,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Start your investment journey',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: _textSecondary,
-                                fontWeight: FontWeight.w400,
-                              ),
+                      Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          color: isDarkMode ? Colors.grey[900] : Colors.white,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
                             ),
                           ],
+                        ),
+                        child: Image.asset(
+                          'icon/investment.png',
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) => Icon(
+                            Icons.trending_up,
+                            size: 60,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'CREATE ACCOUNT',
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Start your investment journey',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Colors.white.withOpacity(0.9),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
-
-              // Lower portion - Form content
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: SlideTransition(
-                      position: _slideAnimation,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: _backgroundSecondary.withOpacity(isDark ? 0.3 : 0.7),
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(32),
-                            topRight: Radius.circular(32),
-                          ),
-                          border: Border.all(
-                            color: _borderColor.withOpacity(0.3),
-                          ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(24.0),
-                          child: Form(
-                            key: _formKey,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Username Field
-                                _buildTextField(
-                                  controller: _usernameController,
-                                  label: 'Username',
-                                  icon: Icons.person_outline,
-                                  validator: _validateUsername,
-                                  helperText: 'Only lowercase letters, numbers, and @ allowed',
-                                ),
-                                const SizedBox(height: 16),
-
-                                // Email Field
-                                _buildTextField(
-                                  controller: _emailController,
-                                  label: 'Email Address',
-                                  icon: Icons.email_outlined,
-                                  validator: _validateEmail,
-                                  keyboardType: TextInputType.emailAddress,
-                                ),
-                                const SizedBox(height: 16),
-
-                                // Password Field
-                                _buildTextField(
-                                  controller: _passwordController,
-                                  label: 'Password',
-                                  icon: Icons.lock_outline,
-                                  validator: _validatePassword,
-                                  obscureText: _obscurePassword,
-                                  helperText: 'Min 8 chars, 1 upper, 1 lower, 1 number, 1 special',
-                                  suffixIcon: IconButton(
-                                    icon: Icon(
-                                      _obscurePassword
-                                          ? Icons.visibility_outlined
-                                          : Icons.visibility_off_outlined,
-                                      color: _textSecondary,
-                                    ),
-                                    onPressed: () {
-                                      setState(() {
-                                        _obscurePassword = !_obscurePassword;
-                                      });
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-
-                                // Confirm Password Field
-                                _buildTextField(
-                                  controller: _confirmPasswordController,
-                                  label: 'Confirm Password',
-                                  icon: Icons.lock_clock_outlined,
-                                  validator: _validateConfirmPassword,
-                                  obscureText: _obscureConfirmPassword,
-                                  textInputAction: TextInputAction.done,
-                                  onFieldSubmitted: _register,
-                                  suffixIcon: IconButton(
-                                    icon: Icon(
-                                      _obscureConfirmPassword
-                                          ? Icons.visibility_outlined
-                                          : Icons.visibility_off_outlined,
-                                      color: _textSecondary,
-                                    ),
-                                    onPressed: () {
-                                      setState(() {
-                                        _obscureConfirmPassword = !_obscureConfirmPassword;
-                                      });
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(height: 32),
-
-                                // Register Button
-                                AnimatedBuilder(
-                                  animation: _buttonController,
-                                  builder: (context, child) {
-                                    return Transform.scale(
-                                      scale: 1.0 - (_buttonController.value * 0.02),
-                                      child: Container(
-                                        width: double.infinity,
-                                        height: 52,
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [_primaryAccent, _secondaryAccent],
-                                            begin: Alignment.centerLeft,
-                                            end: Alignment.centerRight,
-                                          ),
-                                          borderRadius: BorderRadius.circular(12),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: _primaryAccent.withOpacity(0.3),
-                                              blurRadius: 12,
-                                              offset: const Offset(0, 4),
-                                            ),
-                                          ],
-                                        ),
-                                        child: ElevatedButton(
-                                          onPressed: _isLoading ? null : _register,
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.transparent,
-                                            shadowColor: Colors.transparent,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                          ),
-                                          child: _isLoading
-                                              ? SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                              color: isDark ? const Color(0xFF0A0E1A) : Colors.white,
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                              : Text(
-                                            'CREATE ACCOUNT',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: isDark ? const Color(0xFF0A0E1A) : Colors.white,
-                                              letterSpacing: 1,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 24),
-
-                                // Login Link
-                                Center(
-                                  child: TextButton(
-                                    onPressed: _isLoading
-                                        ? null
-                                        : () {
-                                      Navigator.pushReplacement(
-                                        context,
-                                        PageRouteBuilder(
-                                          pageBuilder: (context, animation, secondaryAnimation) =>
-                                          const LoginScreen(),
-                                          transitionsBuilder:
-                                              (context, animation, secondaryAnimation, child) {
-                                            return SlideTransition(
-                                              position: Tween<Offset>(
-                                                begin: const Offset(-1.0, 0.0),
-                                                end: Offset.zero,
-                                              ).animate(CurvedAnimation(
-                                                parent: animation,
-                                                curve: Curves.easeInOut,
-                                              )),
-                                              child: child,
-                                            );
-                                          },
-                                        ),
-                                      );
-                                    },
-                                    child: RichText(
-                                      text: TextSpan(
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: _textSecondary,
-                                        ),
-                                        children: [
-                                          const TextSpan(text: "Already have an account? "),
-                                          TextSpan(
-                                            text: "SIGN IN",
-                                            style: TextStyle(
-                                              color: _primaryAccent,
-                                              fontWeight: FontWeight.w600,
-                                              letterSpacing: 0.5,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                              ],
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(32),
+                        topRight: Radius.circular(32),
+                      ),
+                    ),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 16),
+                            _buildTextField(
+                              controller: _usernameController,
+                              label: 'Username',
+                              icon: Icons.person_outline,
+                              validator: _validateUsername,
+                              realTimeError: _usernameError,
                             ),
-                          ),
+                            const SizedBox(height: 20),
+                            _buildTextField(
+                              controller: _emailController,
+                              label: 'Email Address',
+                              icon: Icons.email_outlined,
+                              validator: _validateEmail,
+                              realTimeError: _emailError,
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            const SizedBox(height: 20),
+                            _buildTextField(
+                              controller: _passwordController,
+                              label: 'Password',
+                              icon: Icons.lock_outline,
+                              validator: _validatePassword,
+                              realTimeError: _passwordError,
+                              obscureText: _obscurePassword,
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            _buildTextField(
+                              controller: _confirmPasswordController,
+                              label: 'Confirm Password',
+                              icon: Icons.lock_clock_outlined,
+                              validator: _validateConfirmPassword,
+                              realTimeError: _confirmPasswordError,
+                              obscureText: _obscureConfirmPassword,
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscureConfirmPassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                                onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                              ),
+                            ),
+                            const SizedBox(height: 32),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 52,
+                              child: ElevatedButton(
+                                onPressed: _isLoading ? null : _register,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Theme.of(context).colorScheme.primary,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: _isLoading
+                                    ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                )
+                                    : const Text(
+                                  'CREATE ACCOUNT',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 1),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            TextButton(
+                              onPressed: _isLoading ? null : () {
+                                Navigator.pushReplacement(
+                                  context,
+                                  PageRouteBuilder(
+                                    pageBuilder: (context, animation, _) => const LoginScreen(),
+                                    transitionsBuilder: (context, animation, _, child) =>
+                                        FadeTransition(opacity: animation, child: child),
+                                  ),
+                                );
+                              },
+                              child: RichText(
+                                text: TextSpan(
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                  children: [
+                                    const TextSpan(text: "Already have an account? "),
+                                    TextSpan(
+                                      text: "SIGN IN",
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.primary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

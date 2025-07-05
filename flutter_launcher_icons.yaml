@@ -1,23 +1,23 @@
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "icon/investment.png"
+  image_path: "icon/investmenticon.png"
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "icon/investment.png"
+  adaptive_icon_foreground: "icon/investmenticon.png"
   min_sdk_android: 21
   android_gravity: center
   web:
     generate: true
-    image_path: "icon/investment.png"
+    image_path: "icon/investmenticon.png"
     background_color: "#hexcode"
     theme_color: "#hexcode"
     icons:
       - sizes: [192, 384, 512]
-        src: "icons/Icon-maskable.png"
+        src: "icon/investmenticon.png"
   windows:
     generate: true
-    image_path: "icon/investment.png"
+    image_path: "icon/investmenticon.png"
     icon_size: 512
   macos:
     generate: true
-    image_path: "icon/investment.png"
+    image_path: "icon/investmenticon.png"

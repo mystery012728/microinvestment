@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/portfolio_provider.dart';
 import '../models/asset.dart';
 import '../utils/theme.dart';
@@ -10,48 +11,37 @@ import '../widgets/portfolio_chart.dart';
 import '../widgets/sell_asset_dialog.dart';
 import 'wallet_screen.dart';
 
-class PortfolioScreen extends StatelessWidget {
+class PortfolioScreen extends StatefulWidget {
   const PortfolioScreen({super.key});
+
+  @override
+  State<PortfolioScreen> createState() => _PortfolioScreenState();
+}
+
+class _PortfolioScreenState extends State<PortfolioScreen> {
+  double _walletBalance = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWalletBalance();
+  }
+
+  Future<void> _loadWalletBalance() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() => _walletBalance = prefs.getDouble('wallet_balance') ?? 0.0);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Portfolio'),
+        leading: _buildWalletBalance(),
+        leadingWidth: 120,
         actions: [
-          // Wallet Icon with Balance
-          GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const WalletScreen()),
-            ),
-            child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.account_balance_wallet,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '\$200',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => context.read<PortfolioProvider>().refreshPortfolio(),
@@ -67,11 +57,50 @@ class PortfolioScreen extends StatelessWidget {
           if (provider.isLoading && provider.assets.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
-
           return provider.assets.isEmpty
               ? _buildEmptyState(context)
               : _buildPortfolioContent(context, provider);
         },
+      ),
+    );
+  }
+
+  Widget _buildWalletBalance() {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const WalletScreen()),
+        ).then((_) => _loadWalletBalance());
+      },
+      child: Container(
+        margin: const EdgeInsets.only(left: 8, top: 8, bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.account_balance_wallet,
+              size: 16,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                '\$${_walletBalance.toStringAsFixed(2)}',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -85,7 +114,6 @@ class PortfolioScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Portfolio Summary
             PortfolioSummaryCard(
               totalValue: provider.totalValue,
               totalInvested: provider.totalInvested,
@@ -93,8 +121,6 @@ class PortfolioScreen extends StatelessWidget {
               totalGainLossPercent: provider.totalGainLossPercent,
             ),
             const SizedBox(height: 24),
-
-            // Portfolio Chart
             if (provider.assets.isNotEmpty) ...[
               Card(
                 child: Padding(
@@ -111,25 +137,16 @@ class PortfolioScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
             ],
-
-            // Assets List
             Text('Your Assets', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
-
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: provider.assets.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final asset = provider.assets[index];
-                return AssetListItem(
-                  asset: asset,
-                  onTap: () => _showAssetDetails(context, asset),
-                  onDelete: () => _deleteAsset(context, asset),
-                );
-              },
-            ),
+            ...provider.assets.map((asset) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: AssetListItem(
+                asset: asset,
+                onTap: () => _showAssetDetails(context, asset),
+                onDelete: () => _deleteAsset(context, asset),
+              ),
+            )),
             const SizedBox(height: 100),
           ],
         ),
@@ -172,7 +189,10 @@ class PortfolioScreen extends StatelessWidget {
   }
 
   void _showAddAssetDialog(BuildContext context) {
-    showDialog(context: context, builder: (context) => const AddAssetDialog());
+    showDialog(
+      context: context,
+      builder: (context) => const AddAssetDialog(),
+    ).then((_) => _loadWalletBalance());
   }
 
   void _showAssetDetails(BuildContext context, Asset asset) {
@@ -226,7 +246,6 @@ class _AssetDetailsSheet extends StatelessWidget {
           ),
           child: Column(
             children: [
-              // Handle
               Container(
                 margin: const EdgeInsets.symmetric(vertical: 8),
                 width: 40,
@@ -236,11 +255,7 @@ class _AssetDetailsSheet extends StatelessWidget {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-
-              // Header
               _buildHeader(context),
-
-              // Details
               Expanded(
                 child: ListView(
                   controller: scrollController,
@@ -256,12 +271,8 @@ class _AssetDetailsSheet extends StatelessWidget {
                         '${asset.totalGainLoss >= 0 ? '+' : ''}\$${asset.totalGainLoss.toStringAsFixed(2)} (${asset.totalGainLossPercent.toStringAsFixed(2)}%)',
                         asset.totalGainLoss >= 0 ? AppTheme.primaryGreen : AppTheme.primaryRed),
                     const SizedBox(height: 24),
-
-                    // Holdings Info
                     _buildHoldingsCard(context),
                     const SizedBox(height: 24),
-
-                    // Action Buttons
                     _buildActionButtons(context),
                   ],
                 ),
@@ -291,16 +302,10 @@ class _AssetDetailsSheet extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  asset.symbol,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  asset.name,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                  ),
-                ),
+                Text(asset.symbol, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                Text(asset.name, style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                )),
               ],
             ),
           ),
@@ -318,10 +323,12 @@ class _AssetDetailsSheet extends StatelessWidget {
           children: [
             Text('Holdings', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
-            _buildInfoRow(context, 'Quantity', '${asset.quantity}'),
-            _buildInfoRow(context, 'Buy Price', '\$${asset.buyPrice.toStringAsFixed(2)}'),
-            _buildInfoRow(context, 'Current Price', '\$${asset.currentPrice.toStringAsFixed(2)}'),
-            _buildInfoRow(context, 'Purchase Date', _formatDate(asset.purchaseDate)),
+            ...([
+              ('Quantity', '${asset.quantity}'),
+              ('Buy Price', '\$${asset.buyPrice.toStringAsFixed(2)}'),
+              ('Current Price', '\$${asset.currentPrice.toStringAsFixed(2)}'),
+              ('Purchase Date', _formatDate(asset.purchaseDate)),
+            ].map((item) => _buildInfoRow(context, item.$1, item.$2))),
           ],
         ),
       ),
@@ -335,7 +342,7 @@ class _AssetDetailsSheet extends StatelessWidget {
           child: ElevatedButton.icon(
             onPressed: () {
               Navigator.of(context).pop();
-              _showSellDialog(context, asset);
+              showDialog(context: context, builder: (context) => SellAssetDialog(asset: asset));
             },
             icon: const Icon(Icons.trending_down),
             label: const Text('Sell'),
@@ -351,7 +358,7 @@ class _AssetDetailsSheet extends StatelessWidget {
           child: OutlinedButton.icon(
             onPressed: () {
               Navigator.of(context).pop();
-              _showAddMoreDialog(context, asset);
+              showDialog(context: context, builder: (context) => const AddAssetDialog());
             },
             icon: const Icon(Icons.add),
             label: const Text('Buy More'),
@@ -371,20 +378,14 @@ class _AssetDetailsSheet extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-              ),
-            ),
+            Text(title, style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+            )),
             const SizedBox(height: 4),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            Text(value, style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.bold,
+            )),
           ],
         ),
       ),
@@ -397,28 +398,14 @@ class _AssetDetailsSheet extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-            ),
-          ),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
-          ),
+          Text(label, style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+          )),
+          Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
         ],
       ),
     );
   }
 
   String _formatDate(DateTime date) => '${date.day}/${date.month}/${date.year}';
-
-  void _showSellDialog(BuildContext context, Asset asset) {
-    showDialog(context: context, builder: (context) => SellAssetDialog(asset: asset));
-  }
-
-  void _showAddMoreDialog(BuildContext context, Asset asset) {
-    showDialog(context: context, builder: (context) => const AddAssetDialog());
-  }
 }

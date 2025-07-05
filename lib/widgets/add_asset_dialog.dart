@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/asset.dart';
 import '../providers/portfolio_provider.dart';
 import '../services/real_time_api_service.dart';
@@ -16,7 +18,6 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   final _formKey = GlobalKey<FormState>();
   final _symbolController = TextEditingController();
   final _quantityController = TextEditingController();
-  final _scrollController = ScrollController();
 
   AssetType _selectedType = AssetType.stock;
   bool _isLoading = false;
@@ -25,34 +26,55 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   String? _selectedAssetName;
   double? _currentPrice;
   String? _selectedMarket;
+  double _walletBalance = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWalletBalance();
+  }
 
   @override
   void dispose() {
     _symbolController.dispose();
     _quantityController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
+  Future<void> _loadWalletBalance() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _walletBalance = prefs.getDouble('wallet_balance') ?? 0.0;
+    });
+  }
+
+  Future<void> _updateWalletBalance(double amount) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _walletBalance -= amount;
+    });
+    await prefs.setDouble('wallet_balance', _walletBalance);
+  }
+
+  double get _totalInvestment {
+    final quantity = double.tryParse(_quantityController.text) ?? 0;
+    return quantity * (_currentPrice ?? 0);
+  }
+
+  bool get _hasInsufficientBalance => _totalInvestment > _walletBalance;
+
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final maxHeight = screenHeight * 0.9;
-    final maxWidth = screenWidth > 600 ? 500.0 : screenWidth * 0.95;
-
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
       child: Container(
-        width: maxWidth,
-        constraints: BoxConstraints(maxHeight: maxHeight),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildHeader(context),
+            _buildHeader(),
             Flexible(
               child: SingleChildScrollView(
-                controller: _scrollController,
                 padding: const EdgeInsets.all(24),
                 child: Form(
                   key: _formKey,
@@ -60,6 +82,8 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _buildWalletBalance(),
+                      const SizedBox(height: 24),
                       _buildAssetTypeSelection(),
                       const SizedBox(height: 24),
                       _buildSymbolSearch(),
@@ -71,7 +95,6 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
                         _buildTotalInvestment(),
                       const SizedBox(height: 32),
                       _buildActionButtons(),
-                      const SizedBox(height: 16),
                     ],
                   ),
                 ),
@@ -83,43 +106,48 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(24, 20, 16, 16),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(12),
-          topRight: Radius.circular(12),
-        ),
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-          ),
-        ),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+        border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outline.withOpacity(0.2))),
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.add_shopping_cart,
-            color: Theme.of(context).colorScheme.primary,
-            size: 24,
-          ),
+          Icon(Icons.add_shopping_cart, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 12),
-          Text(
-            'Add Asset',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text('Add Asset', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
           const Spacer(),
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
             icon: const Icon(Icons.close),
-            style: IconButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
-            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWalletBalance() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.account_balance_wallet, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Wallet Balance', style: Theme.of(context).textTheme.bodyMedium),
+              Text('\$${_walletBalance.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+            ],
           ),
         ],
       ),
@@ -130,31 +158,21 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Asset Type',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        Text('Asset Type', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<AssetType>(
-            segments: AssetType.values.map((type) => ButtonSegment<AssetType>(
-              value: type,
-              label: FittedBox(
-                child: Text(type.displayName, style: const TextStyle(fontSize: 12)),
-              ),
-              icon: Text(type.icon, style: const TextStyle(fontSize: 16)),
-            )).toList(),
-            selected: {_selectedType},
-            onSelectionChanged: (Set<AssetType> selection) {
-              setState(() {
-                _selectedType = selection.first;
-                _resetSearch();
-              });
-            },
-          ),
+        SegmentedButton<AssetType>(
+          segments: AssetType.values.map((type) => ButtonSegment<AssetType>(
+            value: type,
+            label: Text(type.displayName),
+            icon: Text(type.icon),
+          )).toList(),
+          selected: {_selectedType},
+          onSelectionChanged: (Set<AssetType> selection) {
+            setState(() {
+              _selectedType = selection.first;
+              _resetSearch();
+            });
+          },
         ),
       ],
     );
@@ -164,12 +182,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Search Asset',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        Text('Search Asset', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         TextFormField(
           controller: _symbolController,
@@ -178,24 +191,13 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
             hintText: _getHintText(),
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.search),
-            suffixIcon: _isSearching ? const Padding(
-              padding: EdgeInsets.all(12.0),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ) : null,
+            suffixIcon: _isSearching ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator()) : null,
           ),
           textCapitalization: TextCapitalization.characters,
           onChanged: _searchAssets,
           validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Please enter a symbol';
-            }
-            if (_currentPrice == null) {
-              return 'Please select a valid asset from search results';
-            }
+            if (value == null || value.isEmpty) return 'Please enter a symbol';
+            if (_currentPrice == null) return 'Please select a valid asset';
             return null;
           },
         ),
@@ -204,198 +206,62 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   }
 
   Widget _buildSearchResults() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 16),
-        Text(
-          'Search Results',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          constraints: const BoxConstraints(maxHeight: 200),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      constraints: const BoxConstraints(maxHeight: 200),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: _searchResults.length,
+        itemBuilder: (context, index) => ListTile(
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(8),
             ),
-            borderRadius: BorderRadius.circular(12),
+            child: Center(child: Text(_getTypeIcon(_searchResults[index]['type']))),
           ),
-          child: ListView.separated(
-            shrinkWrap: true,
-            itemCount: _searchResults.length,
-            separatorBuilder: (context, index) => Divider(
-              height: 1,
-              color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
-            ),
-            itemBuilder: (context, index) => _buildSearchResultItem(_searchResults[index]),
-          ),
+          title: Text(_searchResults[index]['symbol']),
+          subtitle: Text(_searchResults[index]['name']),
+          onTap: () => _selectAsset(_searchResults[index]),
         ),
-      ],
+      ),
     );
   }
 
-  Widget _buildSearchResultItem(Map<String, dynamic> result) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      leading: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Center(
-          child: Text(
-            _getTypeIcon(result['type']),
-            style: const TextStyle(fontSize: 16),
-          ),
-        ),
+  Widget _buildPriceDisplay() {
+    return Container(
+      margin: const EdgeInsets.only(top: 24),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(16),
       ),
-      title: Text(
-        result['symbol'],
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
         children: [
-          Text(
-            result['name'],
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12),
-          ),
-          const SizedBox(height: 2),
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  result['market'],
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onPrimary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                result['type'].toUpperCase(),
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              Icon(Icons.trending_up, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Current Price', style: Theme.of(context).textTheme.bodyMedium),
+                    Text('\$${_currentPrice!.toStringAsFixed(2)}',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                  ],
                 ),
               ),
             ],
           ),
         ],
       ),
-      onTap: () => _selectAsset(result),
-    );
-  }
-
-  Widget _buildPriceDisplay() {
-    return Column(
-      children: [
-        const SizedBox(height: 24),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Theme.of(context).colorScheme.primaryContainer,
-                Theme.of(context).colorScheme.primaryContainer.withOpacity(0.7),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
-            ),
-          ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.trending_up,
-                      color: Theme.of(context).colorScheme.onPrimary,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Current Market Price',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onPrimaryContainer,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '\$${_currentPrice!.toStringAsFixed(2)}',
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface.withOpacity(0.8),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      size: 16,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Asset will be purchased at current market price',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 
@@ -403,34 +269,22 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Quantity',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        Text('Quantity', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         TextFormField(
           controller: _quantityController,
           decoration: const InputDecoration(
             labelText: 'Number of shares/units',
-            hintText: 'Enter quantity to purchase',
             border: OutlineInputBorder(),
             prefixIcon: Icon(Icons.numbers),
           ),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-          ],
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))],
           onChanged: (value) => setState(() {}),
           validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Please enter quantity';
-            }
+            if (value == null || value.isEmpty) return 'Please enter quantity';
             final quantity = double.tryParse(value);
-            if (quantity == null || quantity <= 0) {
-              return 'Please enter a valid quantity';
-            }
+            if (quantity == null || quantity <= 0) return 'Please enter a valid quantity';
             return null;
           },
         ),
@@ -439,56 +293,43 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   }
 
   Widget _buildTotalInvestment() {
-    return Column(
-      children: [
-        const SizedBox(height: 20),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-            ),
-          ),
-          child: Column(
+    return Container(
+      margin: const EdgeInsets.only(top: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _hasInsufficientBalance ? Colors.red.withOpacity(0.1) : Theme.of(context).colorScheme.surfaceVariant,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _hasInsufficientBalance ? Colors.red : Theme.of(context).colorScheme.outline.withOpacity(0.2),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildInvestmentRow('Price per unit:', '\$${_currentPrice!.toStringAsFixed(2)}'),
-              const SizedBox(height: 8),
-              _buildInvestmentRow('Quantity:', _quantityController.text),
-              const Divider(height: 20),
-              _buildInvestmentRow(
-                'Total Investment:',
-                '\$${_calculateTotalInvestment().toStringAsFixed(2)}',
-                isTotal: true,
-              ),
+              Text('Total Investment:', style: Theme.of(context).textTheme.bodyMedium),
+              Text('\$${_totalInvestment.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             ],
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInvestmentRow(String label, String value, {bool isTotal = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-            fontWeight: isTotal ? FontWeight.bold : null,
-          ),
-        ),
-        Text(
-          value,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: isTotal ? Theme.of(context).colorScheme.primary : null,
-          ),
-        ),
-      ],
+          if (_hasInsufficientBalance) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.warning, color: Colors.red, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Insufficient balance to buy this asset',
+                    style: TextStyle(color: Colors.red, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -498,9 +339,6 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
         Expanded(
           child: OutlinedButton(
             onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
             child: const Text('Cancel'),
           ),
         ),
@@ -508,23 +346,9 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
         Expanded(
           flex: 2,
           child: ElevatedButton.icon(
-            onPressed: _isLoading || _currentPrice == null ? null : _addAsset,
-            icon: _isLoading
-                ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            )
-                : const Icon(Icons.shopping_cart),
+            onPressed: _isLoading || _currentPrice == null || _hasInsufficientBalance ? null : _addAsset,
+            icon: _isLoading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator()) : const Icon(Icons.shopping_cart),
             label: Text(_isLoading ? 'Processing...' : 'Buy Asset'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
-            ),
           ),
         ),
       ],
@@ -533,39 +357,29 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
 
   String _getHintText() {
     switch (_selectedType) {
-      case AssetType.stock:
-        return 'e.g., AAPL, RELIANCE, TCS';
-      case AssetType.crypto:
-        return 'e.g., BTC, ETH, ADA';
-      case AssetType.etf:
-        return 'e.g., SPY, QQQ, VTI';
+      case AssetType.stock: return 'e.g., AAPL, RELIANCE';
+      case AssetType.crypto: return 'e.g., BTC, ETH';
+      case AssetType.etf: return 'e.g., SPY, QQQ';
     }
   }
 
   String _getTypeIcon(String type) {
     switch (type.toLowerCase()) {
-      case 'crypto':
-        return '₿';
-      case 'stock':
-        return '📈';
-      case 'etf':
-        return '📊';
-      default:
-        return '💰';
+      case 'crypto': return '₿';
+      case 'stock': return '📈';
+      case 'etf': return '📊';
+      default: return '💰';
     }
   }
 
-  double _calculateTotalInvestment() {
-    final quantity = double.tryParse(_quantityController.text) ?? 0;
-    return quantity * (_currentPrice ?? 0);
-  }
-
   void _resetSearch() {
-    _searchResults.clear();
-    _selectedAssetName = null;
-    _currentPrice = null;
-    _selectedMarket = null;
-    _symbolController.clear();
+    setState(() {
+      _searchResults.clear();
+      _selectedAssetName = null;
+      _currentPrice = null;
+      _selectedMarket = null;
+      _symbolController.clear();
+    });
   }
 
   Future<void> _searchAssets(String query) async {
@@ -580,29 +394,21 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     }
 
     setState(() => _isSearching = true);
-
     try {
       final results = await RealTimeApiService.searchAssets(query);
       setState(() {
-        _searchResults = results
-            .where((result) => _isValidAssetType(result['type']))
-            .take(10)
-            .toList();
-        _isSearching = false;
+        _searchResults = results.where((result) => _isValidAssetType(result['type'])).take(10).toList();
       });
     } catch (e) {
-      setState(() {
-        _searchResults.clear();
-        _isSearching = false;
-      });
-      _showErrorSnackBar('Search failed: $e');
+      setState(() => _searchResults.clear());
+      _showSnackBar('Search failed: $e', isError: true);
+    } finally {
+      setState(() => _isSearching = false);
     }
   }
 
   bool _isValidAssetType(String type) {
-    return type == _selectedType.name ||
-        (_selectedType == AssetType.crypto && type == 'crypto') ||
-        (_selectedType == AssetType.stock && (type == 'stock' || type == 'etf'));
+    return type == _selectedType.name || (_selectedType == AssetType.stock && type == 'etf');
   }
 
   Future<void> _selectAsset(Map<String, dynamic> asset) async {
@@ -616,16 +422,12 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
 
     try {
       final price = await _fetchAssetPrice(asset);
-      setState(() {
-        _currentPrice = price;
-        _isLoading = false;
-      });
+      setState(() => _currentPrice = price);
     } catch (e) {
-      setState(() {
-        _currentPrice = null;
-        _isLoading = false;
-      });
-      _showErrorSnackBar('Failed to fetch price: $e');
+      setState(() => _currentPrice = null);
+      _showSnackBar('Failed to fetch price: $e', isError: true);
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -647,7 +449,6 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-
     try {
       final asset = Asset(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -660,60 +461,43 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
         purchaseDate: DateTime.now(),
       );
 
+      // Store in Firebase
+      await FirebaseFirestore.instance.collection('buy_details').add({
+        'asset_id': asset.id,
+        'symbol': asset.symbol,
+        'name': asset.name,
+        'type': asset.type.name,
+        'quantity': asset.quantity,
+        'buy_price': asset.buyPrice,
+        'total_investment': _totalInvestment,
+        'market': _selectedMarket,
+        'purchase_date': asset.purchaseDate,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      // Update wallet balance
+      await _updateWalletBalance(_totalInvestment);
+
+      // Add to portfolio
       if (mounted) {
         await context.read<PortfolioProvider>().addAsset(asset);
         Navigator.of(context).pop();
-        _showSuccessSnackBar(asset.symbol);
+        _showSnackBar('${asset.symbol} purchased successfully!', isError: false);
       }
     } catch (e) {
-      _showErrorSnackBar('Failed to purchase asset: $e');
+      _showSnackBar('Failed to purchase asset: $e', isError: true);
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showErrorSnackBar(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.error, color: Colors.white),
-              const SizedBox(width: 8),
-              Expanded(child: Text(message)),
-            ],
-          ),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
-  void _showSuccessSnackBar(String symbol) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle, color: Colors.white),
-              const SizedBox(width: 8),
-              Expanded(child: Text('$symbol purchased successfully!')),
-            ],
-          ),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(
-            label: 'View Portfolio',
-            textColor: Colors.white,
-            onPressed: () {
-              // Navigate to portfolio screen if needed
-            },
-          ),
-        ),
-      );
-    }
+  void _showSnackBar(String message, {required bool isError}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+      ),
+    );
   }
 }
