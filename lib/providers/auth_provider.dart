@@ -53,13 +53,7 @@ class AuthProvider with ChangeNotifier {
 
       if (_user != null) {
         // User is signed in with Firebase
-        if (_biometricEnabled) {
-          // If biometric is enabled, require biometric authentication
-          _isAuthenticated = false;
-        } else {
-          // If no biometric, consider authenticated
-          _isAuthenticated = true;
-        }
+        _handleFirebaseAuthSuccess();
       } else {
         // User is not signed in with Firebase
         _isAuthenticated = false;
@@ -75,10 +69,11 @@ class AuthProvider with ChangeNotifier {
 
   void _handleFirebaseAuthSuccess() {
     if (_biometricEnabled) {
-      // If biometric is enabled, require biometric authentication
+      // If biometric is enabled, user needs to authenticate with biometric
+      // Don't set _isAuthenticated to true yet - wait for biometric auth
       _isAuthenticated = false;
     } else {
-      // If no biometric, consider authenticated
+      // If no biometric required, user is fully authenticated
       _isAuthenticated = true;
     }
     notifyListeners();
@@ -301,11 +296,8 @@ class AuthProvider with ChangeNotifier {
       await prefs.setBool('biometric_enabled', true);
       _biometricEnabled = true;
 
-      // If user is currently authenticated, require biometric for next access
-      if (_isAuthenticated) {
-        _isAuthenticated = false;
-      }
-
+      // If user is currently authenticated, they'll need biometric for next access
+      // But don't change current authentication state
       _error = null;
       notifyListeners();
     } catch (e) {

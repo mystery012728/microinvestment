@@ -11,6 +11,7 @@ import 'providers/auth_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/auth_screen.dart';
 import 'screens/main_screen.dart';
+import 'screens/biometric_screen.dart';
 import 'utils/theme.dart';
 
 void main() async {
@@ -74,9 +75,24 @@ class MyApp extends StatelessWidget {
               future: Future.delayed(Duration.zero),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.done) {
-                  return authProvider.isAuthenticated
-                      ? const SplashScreen(child: MainScreen())
-                      : const SplashScreen(child: LoginScreen());
+                  // Determine which screen to show based on auth state
+                  Widget targetScreen;
+
+                  if (authProvider.user == null) {
+                    // User not signed in with Firebase - show login
+                    targetScreen = const LoginScreen();
+                  } else if (authProvider.biometricEnabled && !authProvider.isAuthenticated) {
+                    // User signed in with Firebase but biometric required - show biometric screen
+                    targetScreen = const BiometricScreen();
+                  } else if (authProvider.isAuthenticated) {
+                    // User fully authenticated - show main screen
+                    targetScreen = const MainScreen();
+                  } else {
+                    // Fallback to login
+                    targetScreen = const LoginScreen();
+                  }
+
+                  return SplashScreen(child: targetScreen);
                 }
                 return const Scaffold(
                   body: Center(
@@ -89,6 +105,7 @@ class MyApp extends StatelessWidget {
               '/main': (context) => const MainScreen(),
               '/auth': (context) => const AuthScreen(),
               '/register': (context) => const LoginScreen(),
+              '/biometric': (context) => const BiometricScreen(),
             },
           );
         },

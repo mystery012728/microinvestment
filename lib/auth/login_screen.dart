@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:microinvestment/screens/main_screen.dart';
+import 'package:microinvestment/screens/biometric_screen.dart';
 import 'registration_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -77,7 +77,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         Navigator.pushReplacement(
           context,
           PageRouteBuilder(
-            pageBuilder: (context, animation, _) => const MainScreen(),
+            pageBuilder: (context, animation, _) => const BiometricScreen(),
             transitionsBuilder: (context, animation, _, child) =>
                 FadeTransition(opacity: animation, child: child),
           ),

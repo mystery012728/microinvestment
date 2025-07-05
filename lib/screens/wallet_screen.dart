@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../providers/auth_provider.dart';
 
 class WalletScreen extends StatefulWidget {
@@ -18,9 +19,8 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   List<WalletTransaction> _transactions = [];
   bool _isProcessing = false;
-  bool _showAddDrawer = false;
-  bool _showWithdrawDrawer = false;
   bool _bonusClaimed = false;
+  bool _showAddDrawer = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   String? _currentUserUid;
@@ -84,7 +84,6 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
     try {
       const bonusAmount = 100000.0;
 
-      // Add bonus transaction to Firestore
       await _firestore.collection('add_money').add({
         'userId': _currentUserUid,
         'amount': bonusAmount,
@@ -92,11 +91,9 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      // Update balance
       setState(() => walletBalance += bonusAmount);
       await _saveBalance();
 
-      // Mark bonus as claimed
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('bonus_claimed_$_currentUserUid', true);
       setState(() => _bonusClaimed = true);
@@ -129,7 +126,6 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
     try {
       final futures = await Future.wait([
         _firestore.collection('add_money').where('userId', isEqualTo: _currentUserUid).orderBy('timestamp', descending: true).limit(10).get(),
-        _firestore.collection('withdraw_details').where('userId', isEqualTo: _currentUserUid).orderBy('timestamp', descending: true).limit(10).get(),
         _firestore.collection('buy_details').where('userId', isEqualTo: _currentUserUid).orderBy('timestamp', descending: true).limit(10).get(),
         _firestore.collection('sell_details').where('userId', isEqualTo: _currentUserUid).orderBy('sellDate', descending: true).limit(10).get(),
       ]);
@@ -152,24 +148,13 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         transactions.add(WalletTransaction(
           id: doc.id,
           type: TransactionType.withdrawal,
-          amount: data['amount']?.toDouble() ?? 0.0,
-          description: 'Money withdrawn',
-          date: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
-        ));
-      }
-
-      for (var doc in futures[2].docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        transactions.add(WalletTransaction(
-          id: doc.id,
-          type: TransactionType.withdrawal,
           amount: data['total_investment']?.toDouble() ?? 0.0,
           description: 'Bought ${data['symbol'] ?? 'Stock'}',
           date: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
         ));
       }
 
-      for (var doc in futures[3].docs) {
+      for (var doc in futures[2].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
           id: doc.id,
@@ -187,51 +172,27 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
     }
   }
 
-  Future<void> _processTransaction(bool isAdd) async {
-    if (_currentUserUid == null) {
-      _showMessage('Please log in to perform transactions', isError: true);
-      return;
-    }
-
-    final amount = double.tryParse(_amountController.text);
-    if (amount == null || amount <= 0) {
-      _showMessage('Please enter a valid amount', isError: true);
-      return;
-    }
-
-    if (!isAdd && amount > walletBalance) {
-      _showMessage('Insufficient balance', isError: true);
-      return;
-    }
-
-    setState(() => _isProcessing = true);
-    try {
-      await _firestore.collection(isAdd ? 'add_money' : 'withdraw_details').add({
-        'userId': _currentUserUid,
-        'amount': amount,
-        'description': isAdd ? 'Money added to wallet' : 'Money withdrawn from wallet',
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-
-      setState(() => walletBalance += isAdd ? amount : -amount);
-      await _saveBalance();
-      await _loadTransactions();
-
-      _closeDrawers();
-      _showMessage('${isAdd ? 'Money added' : 'Money withdrawn'} successfully!');
-    } catch (e) {
-      _showMessage('Failed to ${isAdd ? 'add' : 'withdraw'} money: $e', isError: true);
-    } finally {
-      setState(() => _isProcessing = false);
-    }
+  void _navigateToPayment(double amount) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PaymentScreen(
+          amount: amount,
+          userUid: _currentUserUid!,
+          onPaymentSuccess: (amount) {
+            setState(() => walletBalance += amount);
+            _saveBalance();
+            _loadTransactions();
+            _showMessage('Payment successful! \$${amount.toStringAsFixed(0)} added to your wallet!');
+          },
+        ),
+      ),
+    );
   }
 
-  void _closeDrawers() {
-    setState(() {
-      _showAddDrawer = false;
-      _showWithdrawDrawer = false;
-    });
-    _amountController.clear();
+  double _getWalletAmount() {
+    final inputAmount = double.tryParse(_amountController.text) ?? 0.0;
+    return inputAmount * 50; // 100rs = 5000, so 1rs = 50
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -244,54 +205,105 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
     );
   }
 
-  Widget _buildDrawer(bool isAdd) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.2)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _amountController,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
-            decoration: InputDecoration(
-              labelText: 'Amount',
-              prefixText: '\$',
-              border: const OutlineInputBorder(),
-              helperText: isAdd ? null : 'Available: \$${walletBalance.toStringAsFixed(2)}',
+  Widget _buildExpandableAddMoney() {
+    return Column(
+      children: [
+        Container(
+          margin: const EdgeInsets.all(16),
+          child: ElevatedButton.icon(
+            onPressed: () {
+              setState(() {
+                _showAddDrawer = !_showAddDrawer;
+                if (_showAddDrawer) _amountController.clear();
+              });
+            },
+            icon: Icon(_showAddDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+            label: const Text('Add Money'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            autofocus: true,
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _closeDrawers,
-                  child: const Text('Cancel'),
+        ),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          height: _showAddDrawer ? null : 0,
+          child: _showAddDrawer ? Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.2)),
+            ),
+            child: Column(
+              children: [
+                TextField(
+                  controller: _amountController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
+                  decoration: const InputDecoration(
+                    labelText: 'Amount to Pay (₹)',
+                    prefixText: '₹',
+                    border: OutlineInputBorder(),
+                    helperText: '₹100 = \$5000 in wallet',
+                  ),
+                  onChanged: (value) => setState(() {}),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _isProcessing ? null : () => _processTransaction(isAdd),
-                  child: _isProcessing
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(isAdd ? 'Add' : 'Withdraw'),
+                const SizedBox(height: 12),
+                if (_amountController.text.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('You will get:', style: Theme.of(context).textTheme.bodyLarge),
+                        Text(
+                          '\$${_getWalletAmount().toStringAsFixed(0)}',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setState(() => _showAddDrawer = false);
+                          _amountController.clear();
+                        },
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: _amountController.text.isNotEmpty ? () {
+                          final payAmount = double.tryParse(_amountController.text) ?? 0.0;
+                          if (payAmount > 0) {
+                            _navigateToPayment(payAmount);
+                          }
+                        } : null,
+                        child: const Text('Pay Now'),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
+              ],
+            ),
+          ) : const SizedBox(),
+        ),
+      ],
     );
   }
 
@@ -407,6 +419,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
             opacity: _fadeAnimation,
             child: Column(
               children: [
+                // Balance Card
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.all(16),
@@ -501,55 +514,10 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
                     ),
                   ),
 
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                setState(() {
-                                  _showAddDrawer = !_showAddDrawer;
-                                  _showWithdrawDrawer = false;
-                                });
-                                if (_showAddDrawer) _amountController.clear();
-                              },
-                              icon: Icon(_showAddDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-                              label: const Text('Add Money'),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: walletBalance > 0 ? () {
-                                setState(() {
-                                  _showWithdrawDrawer = !_showWithdrawDrawer;
-                                  _showAddDrawer = false;
-                                });
-                                if (_showWithdrawDrawer) _amountController.clear();
-                              } : null,
-                              icon: Icon(_showWithdrawDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-                              label: const Text('Withdraw'),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_showAddDrawer) _buildDrawer(true),
-                      if (_showWithdrawDrawer) _buildDrawer(false),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
+                // Expandable Add Money Section
+                _buildExpandableAddMoney(),
+
+                const SizedBox(height: 8),
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
@@ -595,6 +563,184 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
           ),
         );
       },
+    );
+  }
+}
+
+class PaymentScreen extends StatefulWidget {
+  final double amount;
+  final String userUid;
+  final Function(double) onPaymentSuccess;
+
+  const PaymentScreen({
+    super.key,
+    required this.amount,
+    required this.userUid,
+    required this.onPaymentSuccess,
+  });
+
+  @override
+  State<PaymentScreen> createState() => _PaymentScreenState();
+}
+
+class _PaymentScreenState extends State<PaymentScreen> {
+  late Razorpay _razorpay;
+  bool _isProcessing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    super.dispose();
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    setState(() => _isProcessing = true);
+
+    try {
+      final walletAmount = widget.amount * 50; // Convert to wallet amount
+      await FirebaseFirestore.instance.collection('add_money').add({
+        'userId': widget.userUid,
+        'amount': walletAmount,
+        'description': 'Money added via Razorpay (₹${widget.amount.toStringAsFixed(0)})',
+        'paymentId': response.paymentId,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+
+      widget.onPaymentSuccess(walletAmount);
+      Navigator.pop(context);
+    } catch (e) {
+      _showMessage('Payment successful but failed to update wallet: $e', isError: true);
+    } finally {
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    _showMessage('Payment failed: ${response.message}', isError: true);
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    _showMessage('External wallet selected: ${response.walletName}');
+  }
+
+  void _startPayment() {
+    var options = {
+      'key': 'rzp_test_cFaOVaXjJp8oB2',
+      'amount': (widget.amount * 100).toInt(),
+      'name': 'Wallet Top-up',
+      'description': 'Add money to wallet',
+      'prefill': {
+        'contact': '9999999999',
+        'email': 'user@example.com'
+      }
+    };
+
+    try {
+      _razorpay.open(options);
+    } catch (e) {
+      _showMessage('Error: $e', isError: true);
+    }
+  }
+
+  void _showMessage(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        duration: Duration(seconds: isError ? 4 : 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final walletAmount = widget.amount * 50;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Add Money'),
+        centerTitle: true,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.payment, size: 64, color: Colors.blue),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Payment Details',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Pay Amount:', style: TextStyle(fontSize: 16)),
+                      Text(
+                        '₹${widget.amount.toStringAsFixed(0)}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Wallet Credit:', style: TextStyle(fontSize: 16)),
+                      Text(
+                        '\$${walletAmount.toStringAsFixed(0)}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isProcessing ? null : _startPayment,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: _isProcessing
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Text('Pay Now', style: TextStyle(fontSize: 18)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
