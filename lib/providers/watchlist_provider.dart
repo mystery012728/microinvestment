@@ -91,6 +91,9 @@ class WatchlistProvider with ChangeNotifier {
         'priceChangePercent': 0.0,
         'alertPrice': 0.0,
         'alertEnabled': false,
+        'lastAlertTriggered': false,
+        'lastAlertTime': null,
+        'alertTriggeredAt': null,
         'market': market,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -129,6 +132,9 @@ class WatchlistProvider with ChangeNotifier {
           .update({
         'alertPrice': alertPrice,
         'alertEnabled': enabled,
+        'lastAlertTriggered': false, // Reset alert status when setting new alert
+        'lastAlertTime': null,
+        'alertTriggeredAt': null,
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
@@ -144,12 +150,20 @@ class WatchlistProvider with ChangeNotifier {
 
       // Show confirmation notification
       if (enabled && alertPrice > 0) {
-        await NotificationService().showPriceAlert(
-          symbol: _items[index].symbol,
-          currentPrice: _items[index].currentPrice,
-          alertPrice: alertPrice,
-          isAbove: alertPrice > _items[index].currentPrice,
-        );
+        final item = _items[index];
+        final currentPrice = item.currentPrice;
+
+        String alertMessage;
+        if (alertPrice > currentPrice) {
+          alertMessage = 'Alert set for ${item.symbol} at \$${alertPrice.toStringAsFixed(2)} (${((alertPrice - currentPrice) / currentPrice * 100).toStringAsFixed(1)}% above current price)';
+        } else if (alertPrice < currentPrice) {
+          alertMessage = 'Alert set for ${item.symbol} at \$${alertPrice.toStringAsFixed(2)} (${((currentPrice - alertPrice) / currentPrice * 100).toStringAsFixed(1)}% below current price)';
+        } else {
+          alertMessage = 'Alert set for ${item.symbol} at current price \$${alertPrice.toStringAsFixed(2)}';
+        }
+
+        // Show a simple confirmation (you can customize this)
+        print(alertMessage);
       }
     } catch (e) {
       print('Error setting price alert: $e');
@@ -171,7 +185,7 @@ class WatchlistProvider with ChangeNotifier {
       for (int i = 0; i < _items.length; i++) {
         final symbol = _items[i].symbol;
         if (prices.containsKey(symbol)) {
-          final newPrice = prices[symbol]!.toDouble(); // Convert to double
+          final newPrice = prices[symbol]!.toDouble();
           final oldPrice = _items[i].currentPrice;
           final priceChange = newPrice - oldPrice;
           final priceChangePercent = oldPrice > 0 ? (priceChange / oldPrice) * 100 : 0.0;
@@ -193,7 +207,7 @@ class WatchlistProvider with ChangeNotifier {
             'updatedAt': FieldValue.serverTimestamp(),
           });
 
-          // Check for significant price changes and notify
+          // Check for significant price changes and notify (only for non-alert notifications)
           if ((priceChangePercent.abs() >= 5.0) && oldPrice > 0) {
             await NotificationService().showPortfolioUpdate(
               symbol: symbol,

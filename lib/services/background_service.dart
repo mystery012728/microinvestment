@@ -14,16 +14,16 @@ class BackgroundService {
   static Future<void> initialize() async {
     await Workmanager().initialize(
       callbackDispatcher,
-      isInDebugMode: false, // Set to false in production
+      isInDebugMode: false, // Disabled debug mode to prevent unwanted notifications
     );
   }
 
   static Future<void> registerPeriodicTasks() async {
-    // Register price check task (every 15 minutes)
+    // Register price check task (every 5 minutes for better alert responsiveness)
     await Workmanager().registerPeriodicTask(
       _priceCheckTask,
       _priceCheckTask,
-      frequency: const Duration(minutes: 15),
+      frequency: const Duration(minutes: 5),
       constraints: Constraints(
         networkType: NetworkType.connected,
         requiresBatteryNotLow: false,
@@ -47,7 +47,7 @@ class BackgroundService {
       ),
     );
 
-    // Register daily portfolio summary (once per day at 6 PM)
+    // Register daily portfolio summary (once per day)
     await Workmanager().registerPeriodicTask(
       _portfolioSummaryTask,
       _portfolioSummaryTask,
@@ -76,6 +76,7 @@ class BackgroundService {
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     try {
+      // Silent execution - no debug prints or notifications
       switch (task) {
         case BackgroundService._priceCheckTask:
           await _performPriceCheck();
@@ -89,7 +90,7 @@ void callbackDispatcher() {
       }
       return Future.value(true);
     } catch (e) {
-      print('Background task error: $e');
+      // Silent error handling - no debug prints
       return Future.value(false);
     }
   });
@@ -97,8 +98,6 @@ void callbackDispatcher() {
 
 Future<void> _performPriceCheck() async {
   try {
-    print('Performing background price check...');
-
     // Initialize notification service
     final notificationService = NotificationService();
     await notificationService.initialize();
@@ -107,9 +106,9 @@ Future<void> _performPriceCheck() async {
     await _checkWatchlistAlerts(notificationService);
     await _checkPortfolioUpdates(notificationService);
 
-    print('Price check completed successfully');
+    // Silent completion - no debug prints
   } catch (e) {
-    print('Error in price check: $e');
+    // Silent error handling
   }
 }
 
@@ -125,34 +124,88 @@ Future<void> _checkWatchlistAlerts(NotificationService notificationService) asyn
       final data = doc.data();
       final symbol = data['symbol'] as String;
       final alertPrice = (data['alertPrice'] as num).toDouble();
-      final lastPrice = (data['currentPrice'] as num).toDouble();
+      final lastKnownPrice = (data['currentPrice'] as num).toDouble();
+      final lastAlertTriggered = data['lastAlertTriggered'] as bool? ?? false;
 
       // Get current price from API
       final currentPrice = await ApiService.getAssetPrice(symbol);
 
-      // Check if alert should be triggered
-      bool shouldAlert = false;
-      bool isAbove = false;
+      // Determine alert direction and check if threshold is crossed
+      bool shouldTriggerAlert = false;
+      String alertType = '';
+      String alertMessage = '';
 
-      if (alertPrice > lastPrice && currentPrice >= alertPrice) {
-        // Price crossed above alert price
-        shouldAlert = true;
-        isAbove = true;
-      } else if (alertPrice < lastPrice && currentPrice <= alertPrice) {
-        // Price crossed below alert price
-        shouldAlert = true;
-        isAbove = false;
+      // Case 1: Alert price is BELOW current price (waiting for price to DROP)
+      // Example: Current price = 213, Alert price = 180
+      // Trigger when price drops from 213 to 175 (crosses 180 going down)
+      if (alertPrice < lastKnownPrice) {
+        if (currentPrice <= alertPrice && lastKnownPrice > alertPrice) {
+          shouldTriggerAlert = true;
+          alertType = 'DROP';
+          alertMessage = '$symbol has dropped to \$${currentPrice.toStringAsFixed(2)}, crossing your alert price of \$${alertPrice.toStringAsFixed(2)}';
+        }
+      }
+      // Case 2: Alert price is ABOVE current price (waiting for price to RISE)
+      // Example: Current price = 213, Alert price = 300
+      // Trigger when price rises from 213 to 301 (crosses 300 going up)
+      else if (alertPrice > lastKnownPrice) {
+        if (currentPrice >= alertPrice && lastKnownPrice < alertPrice) {
+          shouldTriggerAlert = true;
+          alertType = 'RISE';
+          alertMessage = '$symbol has risen to \$${currentPrice.toStringAsFixed(2)}, crossing your alert price of \$${alertPrice.toStringAsFixed(2)}';
+        }
+      }
+      // Case 3: Alert price equals current price (trigger on any significant movement)
+      else if (alertPrice == lastKnownPrice) {
+        final priceChangePercent = ((currentPrice - lastKnownPrice) / lastKnownPrice * 100).abs();
+        if (priceChangePercent >= 2.0) { // 2% threshold
+          shouldTriggerAlert = true;
+          alertType = currentPrice > lastKnownPrice ? 'RISE' : 'DROP';
+          alertMessage = '$symbol has ${currentPrice > lastKnownPrice ? 'risen' : 'dropped'} to \$${currentPrice.toStringAsFixed(2)} (${priceChangePercent.toStringAsFixed(1)}% change)';
+        }
       }
 
-      if (shouldAlert) {
+      // Trigger alert if conditions are met and not recently triggered
+      if (shouldTriggerAlert && !lastAlertTriggered) {
         await notificationService.showPriceAlert(
           symbol: symbol,
           currentPrice: currentPrice,
           alertPrice: alertPrice,
-          isAbove: isAbove,
+          isAbove: alertType == 'RISE',
+          customMessage: alertMessage,
         );
 
-        // Update the price in Firestore
+        // Update the document with new price and alert status
+        await doc.reference.update({
+          'currentPrice': currentPrice,
+          'lastAlertTriggered': true,
+          'lastAlertTime': FieldValue.serverTimestamp(),
+          'alertTriggeredAt': currentPrice,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+      // Reset alert if price moves significantly away from alert price
+      else if (lastAlertTriggered) {
+        final distanceFromAlert = (currentPrice - alertPrice).abs();
+        final resetThreshold = alertPrice * 0.02; // 2% of alert price
+
+        if (distanceFromAlert > resetThreshold) {
+          // Reset alert so it can trigger again
+          await doc.reference.update({
+            'currentPrice': currentPrice,
+            'lastAlertTriggered': false,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          // Just update current price
+          await doc.reference.update({
+            'currentPrice': currentPrice,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      // Just update current price if no alert conditions met
+      else {
         await doc.reference.update({
           'currentPrice': currentPrice,
           'updatedAt': FieldValue.serverTimestamp(),
@@ -160,7 +213,7 @@ Future<void> _checkWatchlistAlerts(NotificationService notificationService) asyn
       }
     }
   } catch (e) {
-    print('Error checking watchlist alerts: $e');
+    // Silent error handling
   }
 }
 
@@ -202,14 +255,12 @@ Future<void> _checkPortfolioUpdates(NotificationService notificationService) asy
       }
     }
   } catch (e) {
-    print('Error checking portfolio updates: $e');
+    // Silent error handling
   }
 }
 
 Future<void> _performNewsUpdate() async {
   try {
-    print('Performing background news update...');
-
     // Initialize notification service
     final notificationService = NotificationService();
     await notificationService.initialize();
@@ -237,16 +288,14 @@ Future<void> _performNewsUpdate() async {
       }
     }
 
-    print('News update completed successfully');
+    // Silent completion
   } catch (e) {
-    print('Error in news update: $e');
+    // Silent error handling
   }
 }
 
 Future<void> _performPortfolioSummary() async {
   try {
-    print('Performing daily portfolio summary...');
-
     // Initialize notification service
     final notificationService = NotificationService();
     await notificationService.initialize();
@@ -286,16 +335,18 @@ Future<void> _performPortfolioSummary() async {
       final dayChange = totalValue - totalInvested;
       final dayChangePercent = totalInvested > 0 ? (dayChange / totalInvested) * 100 : 0.0;
 
-      // Only send summary if there's significant change or it's been a day
-      await notificationService.showDailyPortfolioSummary(
-        totalValue: totalValue,
-        dayChange: dayChange,
-        dayChangePercent: dayChangePercent,
-      );
+      // Only send summary if there's significant change
+      if (dayChangePercent.abs() >= 1.0) {
+        await notificationService.showDailyPortfolioSummary(
+          totalValue: totalValue,
+          dayChange: dayChange,
+          dayChangePercent: dayChangePercent,
+        );
+      }
     }
 
-    print('Portfolio summary completed successfully');
+    // Silent completion
   } catch (e) {
-    print('Error in portfolio summary: $e');
+    // Silent error handling
   }
 }

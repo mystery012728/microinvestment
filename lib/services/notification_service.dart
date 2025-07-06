@@ -66,29 +66,57 @@ class NotificationService {
     required double currentPrice,
     required double alertPrice,
     required bool isAbove,
+    String? customMessage,
   }) async {
-    final String title = 'Price Alert: $symbol';
-    final String body = '$symbol is now ${isAbove ? 'above' : 'below'} your alert price of \$${alertPrice.toStringAsFixed(2)}. Current price: \$${currentPrice.toStringAsFixed(2)}';
+    final String title = '🚨 Price Alert: $symbol';
+
+    String body;
+    if (customMessage != null) {
+      body = customMessage;
+    } else {
+      if (isAbove) {
+        body = '$symbol has risen to \$${currentPrice.toStringAsFixed(2)}, crossing your alert price of \$${alertPrice.toStringAsFixed(2)} 📈';
+      } else {
+        body = '$symbol has dropped to \$${currentPrice.toStringAsFixed(2)}, crossing your alert price of \$${alertPrice.toStringAsFixed(2)} 📉';
+      }
+    }
+
+    // Add price change information
+    final priceChange = currentPrice - alertPrice;
+    final priceChangePercent = (priceChange / alertPrice * 100);
+    final changeText = priceChange >= 0 ? '+' : '';
+    body += '\n\nChange: $changeText\$${priceChange.toStringAsFixed(2)} (${changeText}${priceChangePercent.toStringAsFixed(1)}%)';
 
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
-        id: symbol.hashCode,
+        id: symbol.hashCode + DateTime.now().millisecondsSinceEpoch.remainder(1000),
         channelKey: _channelKey,
         title: title,
         body: body,
         bigPicture: 'resource://drawable/ic_launcher_foreground',
-        notificationLayout: NotificationLayout.BigPicture,
+        notificationLayout: NotificationLayout.BigText,
         color: isAbove ? const Color(0xFF4CAF50) : const Color(0xFFF44336),
         backgroundColor: isAbove ? const Color(0xFF4CAF50) : const Color(0xFFF44336),
         category: NotificationCategory.Recommendation,
         wakeUpScreen: true,
         fullScreenIntent: true,
         criticalAlert: true,
+        payload: {
+          'symbol': symbol,
+          'currentPrice': currentPrice.toString(),
+          'alertPrice': alertPrice.toString(),
+          'type': 'price_alert',
+        },
       ),
       actionButtons: [
         NotificationActionButton(
           key: 'VIEW_DETAILS',
           label: 'View Details',
+          actionType: ActionType.Default,
+        ),
+        NotificationActionButton(
+          key: 'SET_NEW_ALERT',
+          label: 'Set New Alert',
           actionType: ActionType.Default,
         ),
         NotificationActionButton(
@@ -108,25 +136,38 @@ class NotificationService {
   }) async {
     final bool isPositive = currentValue > previousValue;
     final String changeText = isPositive ? 'increased' : 'decreased';
-    final String title = 'Portfolio Update: $symbol';
-    final String body = 'Your $symbol investment has $changeText by ${changePercent.abs().toStringAsFixed(2)}%. Current value: \$${currentValue.toStringAsFixed(2)}';
+    final String emoji = isPositive ? '📈' : '📉';
+    final String title = '$emoji Portfolio Update: $symbol';
+    final String body = 'Your $symbol investment has $changeText by ${changePercent.abs().toStringAsFixed(2)}%.\n\nCurrent value: \$${currentValue.toStringAsFixed(2)}\nPrevious value: \$${previousValue.toStringAsFixed(2)}\nChange: ${isPositive ? '+' : ''}\$${(currentValue - previousValue).toStringAsFixed(2)}';
 
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
-        id: 'portfolio_${symbol}'.hashCode,
+        id: 'portfolio_${symbol}'.hashCode + DateTime.now().millisecondsSinceEpoch.remainder(1000),
         channelKey: _portfolioChannelKey,
         title: title,
         body: body,
-        summary: '${isPositive ? '📈' : '📉'} ${changePercent.toStringAsFixed(2)}%',
+        summary: '$emoji ${changePercent.toStringAsFixed(2)}%',
+        notificationLayout: NotificationLayout.BigText,
         color: isPositive ? const Color(0xFF4CAF50) : const Color(0xFFF44336),
         category: NotificationCategory.Status,
         wakeUpScreen: false,
+        payload: {
+          'symbol': symbol,
+          'currentValue': currentValue.toString(),
+          'changePercent': changePercent.toString(),
+          'type': 'portfolio_update',
+        },
       ),
       actionButtons: [
         NotificationActionButton(
           key: 'VIEW_PORTFOLIO',
           label: 'View Portfolio',
           actionType: ActionType.Default,
+        ),
+        NotificationActionButton(
+          key: 'DISMISS',
+          label: 'Dismiss',
+          actionType: ActionType.DismissAction,
         ),
       ],
     );
@@ -141,14 +182,17 @@ class NotificationService {
       content: NotificationContent(
         id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
         channelKey: _newsChannelKey,
-        title: 'Financial News Update',
+        title: '📰 Financial News Update',
         body: title,
         summary: summary,
         bigPicture: 'resource://drawable/ic_launcher_foreground',
         notificationLayout: NotificationLayout.BigText,
         color: const Color(0xFFFF9800),
         category: NotificationCategory.Social,
-        payload: {'url': url},
+        payload: {
+          'url': url,
+          'type': 'news_update',
+        },
       ),
       actionButtons: [
         NotificationActionButton(
@@ -172,27 +216,38 @@ class NotificationService {
   }) async {
     final bool isPositive = dayChange >= 0;
     final String changeText = isPositive ? 'gained' : 'lost';
-    final String title = 'Daily Portfolio Summary';
-    final String body = 'Your portfolio has $changeText \$${dayChange.abs().toStringAsFixed(2)} (${dayChangePercent.abs().toStringAsFixed(2)}%) today. Total value: \$${totalValue.toStringAsFixed(2)}';
+    final String emoji = isPositive ? '📈' : '📉';
+    final String title = '$emoji Daily Portfolio Summary';
+    final String body = 'Your portfolio has $changeText \$${dayChange.abs().toStringAsFixed(2)} (${dayChangePercent.abs().toStringAsFixed(2)}%) today.\n\nTotal value: \$${totalValue.toStringAsFixed(2)}\nDaily change: ${isPositive ? '+' : ''}\$${dayChange.toStringAsFixed(2)}\nPercentage: ${isPositive ? '+' : ''}${dayChangePercent.toStringAsFixed(2)}%';
 
     await AwesomeNotifications().createNotification(
       content: NotificationContent(
-        id: 'daily_summary'.hashCode,
+        id: 'daily_summary'.hashCode + DateTime.now().day,
         channelKey: _portfolioChannelKey,
         title: title,
         body: body,
-        summary: '${isPositive ? '📈' : '📉'} ${dayChangePercent.toStringAsFixed(2)}%',
+        summary: '$emoji ${dayChangePercent.toStringAsFixed(2)}%',
         bigPicture: 'resource://drawable/ic_launcher_foreground',
-        notificationLayout: NotificationLayout.BigPicture,
+        notificationLayout: NotificationLayout.BigText,
         color: isPositive ? const Color(0xFF4CAF50) : const Color(0xFFF44336),
         category: NotificationCategory.Status,
         wakeUpScreen: false,
+        payload: {
+          'totalValue': totalValue.toString(),
+          'dayChange': dayChange.toString(),
+          'type': 'daily_summary',
+        },
       ),
       actionButtons: [
         NotificationActionButton(
           key: 'VIEW_PORTFOLIO',
           label: 'View Portfolio',
           actionType: ActionType.Default,
+        ),
+        NotificationActionButton(
+          key: 'DISMISS',
+          label: 'Dismiss',
+          actionType: ActionType.DismissAction,
         ),
       ],
     );
@@ -229,6 +284,10 @@ class NotificationService {
       case 'VIEW_DETAILS':
       case 'VIEW_PORTFOLIO':
       // Navigate to portfolio screen
+      // This would typically be handled by the main app
+        break;
+      case 'SET_NEW_ALERT':
+      // Open alert setting dialog
       // This would typically be handled by the main app
         break;
       case 'READ_MORE':

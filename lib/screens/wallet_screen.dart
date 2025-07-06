@@ -41,8 +41,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
   }
 
   void _getCurrentUser() {
-    final authProvider = context.read<AuthProvider>();
-    _currentUserUid = authProvider.userUid;
+    _currentUserUid = context.read<AuthProvider>().userUid;
     if (_currentUserUid != null) {
       _loadWalletData();
     } else {
@@ -59,22 +58,30 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
   Future<void> _loadBalance() async {
     if (_currentUserUid == null) return;
     final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_$_currentUserUid';
-    setState(() => walletBalance = prefs.getDouble(userWalletKey) ?? 0.0);
+    setState(() => walletBalance = prefs.getDouble('wallet_balance_$_currentUserUid') ?? 0.0);
   }
 
   Future<void> _saveBalance() async {
     if (_currentUserUid == null) return;
     final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_$_currentUserUid';
-    await prefs.setDouble(userWalletKey, walletBalance);
+    await prefs.setDouble('wallet_balance_$_currentUserUid', walletBalance);
   }
 
   Future<void> _loadBonusStatus() async {
     if (_currentUserUid == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    final bonusKey = 'bonus_claimed_$_currentUserUid';
-    setState(() => _bonusClaimed = prefs.getBool(bonusKey) ?? false);
+    try {
+      // Check in Firestore for bonus claim record
+      final bonusDoc = await _firestore
+          .collection('bonus_claims')
+          .doc(_currentUserUid)
+          .get();
+
+      setState(() => _bonusClaimed = bonusDoc.exists);
+    } catch (e) {
+      // Fallback to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      setState(() => _bonusClaimed = prefs.getBool('bonus_claimed_$_currentUserUid') ?? false);
+    }
   }
 
   Future<void> _claimBonus() async {
@@ -84,6 +91,14 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
     try {
       const bonusAmount = 100000.0;
 
+      // Create bonus claim record in Firestore
+      await _firestore.collection('bonus_claims').doc(_currentUserUid).set({
+        'userId': _currentUserUid,
+        'claimedAt': FieldValue.serverTimestamp(),
+        'amount': bonusAmount,
+      });
+
+      // Add transaction record
       await _firestore.collection('add_money').add({
         'userId': _currentUserUid,
         'amount': bonusAmount,
@@ -91,12 +106,16 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      setState(() => walletBalance += bonusAmount);
+      setState(() {
+        walletBalance += bonusAmount;
+        _bonusClaimed = true;
+      });
+
       await _saveBalance();
 
+      // Update local SharedPreferences as backup
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('bonus_claimed_$_currentUserUid', true);
-      setState(() => _bonusClaimed = true);
 
       await _loadTransactions();
       _showMessage('Bonus claimed successfully! \$${bonusAmount.toStringAsFixed(0)} added to your wallet!');
@@ -109,15 +128,13 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
   static Future<double> getCurrentBalance(String userUid) async {
     final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_$userUid';
-    return prefs.getDouble(userWalletKey) ?? 0.0;
+    return prefs.getDouble('wallet_balance_$userUid') ?? 0.0;
   }
 
   static Future<void> updateBalance(String userUid, double amount) async {
     final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_$userUid';
-    final currentBalance = prefs.getDouble(userWalletKey) ?? 0.0;
-    await prefs.setDouble(userWalletKey, currentBalance + amount);
+    final currentBalance = prefs.getDouble('wallet_balance_$userUid') ?? 0.0;
+    await prefs.setDouble('wallet_balance_$userUid', currentBalance + amount);
   }
 
   Future<void> _loadTransactions() async {
@@ -132,6 +149,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
 
       final transactions = <WalletTransaction>[];
 
+      // Add money transactions
       for (var doc in futures[0].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -143,6 +161,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         ));
       }
 
+      // Buy transactions
       for (var doc in futures[1].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -154,6 +173,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         ));
       }
 
+      // Sell transactions
       for (var doc in futures[2].docs) {
         final data = doc.data() as Map<String, dynamic>;
         transactions.add(WalletTransaction(
@@ -190,10 +210,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
     );
   }
 
-  double _getWalletAmount() {
-    final inputAmount = double.tryParse(_amountController.text) ?? 0.0;
-    return inputAmount * 50; // 100rs = 5000, so 1rs = 50
-  }
+  double _getWalletAmount() => (double.tryParse(_amountController.text) ?? 0.0) * 50;
 
   void _showMessage(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -211,12 +228,10 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         Container(
           margin: const EdgeInsets.all(16),
           child: ElevatedButton.icon(
-            onPressed: () {
-              setState(() {
-                _showAddDrawer = !_showAddDrawer;
-                if (_showAddDrawer) _amountController.clear();
-              });
-            },
+            onPressed: () => setState(() {
+              _showAddDrawer = !_showAddDrawer;
+              if (_showAddDrawer) _amountController.clear();
+            }),
             icon: Icon(_showAddDrawer ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
             label: const Text('Add Money'),
             style: ElevatedButton.styleFrom(
@@ -229,79 +244,88 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
           height: _showAddDrawer ? null : 0,
-          child: _showAddDrawer ? Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.2)),
+          child: _showAddDrawer ? _buildAddMoneyContent() : const SizedBox(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAddMoneyContent() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.2)),
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _amountController,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
+            decoration: const InputDecoration(
+              labelText: 'Amount to Pay (₹)',
+              prefixText: '₹',
+              border: OutlineInputBorder(),
+              helperText: '₹100 = \$5000 in wallet',
             ),
-            child: Column(
-              children: [
-                TextField(
-                  controller: _amountController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
-                  decoration: const InputDecoration(
-                    labelText: 'Amount to Pay (₹)',
-                    prefixText: '₹',
-                    border: OutlineInputBorder(),
-                    helperText: '₹100 = \$5000 in wallet',
-                  ),
-                  onChanged: (value) => setState(() {}),
-                ),
-                const SizedBox(height: 12),
-                if (_amountController.text.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('You will get:', style: Theme.of(context).textTheme.bodyLarge),
-                        Text(
-                          '\$${_getWalletAmount().toStringAsFixed(0)}',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          setState(() => _showAddDrawer = false);
-                          _amountController.clear();
-                        },
-                        child: const Text('Cancel'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: _amountController.text.isNotEmpty ? () {
-                          final payAmount = double.tryParse(_amountController.text) ?? 0.0;
-                          if (payAmount > 0) {
-                            _navigateToPayment(payAmount);
-                          }
-                        } : null,
-                        child: const Text('Pay Now'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+            onChanged: (value) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          if (_amountController.text.isNotEmpty) _buildAmountPreview(),
+          const SizedBox(height: 16),
+          _buildActionButtons(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAmountPreview() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('You will get:', style: Theme.of(context).textTheme.bodyLarge),
+          Text(
+            '\$${_getWalletAmount().toStringAsFixed(0)}',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.bold,
             ),
-          ) : const SizedBox(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () {
+              setState(() => _showAddDrawer = false);
+              _amountController.clear();
+            },
+            child: const Text('Cancel'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: _amountController.text.isNotEmpty ? () {
+              final payAmount = double.tryParse(_amountController.text) ?? 0.0;
+              if (payAmount > 0) _navigateToPayment(payAmount);
+            } : null,
+            child: const Text('Pay Now'),
+          ),
         ),
       ],
     );
@@ -327,7 +351,10 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         subtitle: Text('${transaction.date.day}/${transaction.date.month}/${transaction.date.year} ${transaction.date.hour}:${transaction.date.minute.toString().padLeft(2, '0')}'),
         trailing: Text(
           '${isDeposit ? '+' : '-'}\$${transaction.amount.toStringAsFixed(2)}',
-          style: TextStyle(color: isDeposit ? Colors.green : Colors.red, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: isDeposit ? Colors.green : Colors.red,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );
@@ -341,41 +368,90 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
         initialChildSize: 0.8,
         maxChildSize: 0.95,
         minChildSize: 0.6,
-        builder: (context, scrollController) {
-          return Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-            ),
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('Transaction History', style: Theme.of(context).textTheme.titleLarge),
+              ),
+              Expanded(
+                child: _transactions.isEmpty
+                    ? const Center(child: Text('No transactions yet'))
+                    : ListView.builder(
+                  controller: scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _transactions.length,
+                  itemBuilder: (context, index) => _buildTransactionTile(_transactions[index]),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBonusSection() {
+    if (_bonusClaimed) return const SizedBox();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Colors.orange, Colors.amber],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.card_giftcard, size: 40, color: Colors.white),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  margin: const EdgeInsets.symmetric(vertical: 8),
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text('Transaction History', style: Theme.of(context).textTheme.titleLarge),
-                ),
-                Expanded(
-                  child: _transactions.isEmpty
-                      ? const Center(child: Text('No transactions yet'))
-                      : ListView.builder(
-                    controller: scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _transactions.length,
-                    itemBuilder: (context, index) => _buildTransactionTile(_transactions[index]),
-                  ),
-                ),
+                const Text('Welcome Bonus', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                const Text('Claim your \$100,000 bonus!', style: TextStyle(color: Colors.white, fontSize: 14)),
               ],
             ),
-          );
-        },
+          ),
+          ElevatedButton(
+            onPressed: _isProcessing ? null : _claimBonus,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.orange,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+            child: _isProcessing
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Claim'),
+          ),
+        ],
       ),
     );
   }
@@ -386,9 +462,7 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
       builder: (context, authProvider, child) {
         if (_currentUserUid != authProvider.userUid) {
           _currentUserUid = authProvider.userUid;
-          if (_currentUserUid != null) {
-            _loadWalletData();
-          }
+          if (_currentUserUid != null) _loadWalletData();
         }
 
         if (!authProvider.isAuthenticated || _currentUserUid == null) {
@@ -458,65 +532,8 @@ class _WalletScreenState extends State<WalletScreen> with TickerProviderStateMix
                     ],
                   ),
                 ),
-
-                // Bonus Claim Section
-                if (!_bonusClaimed)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Colors.orange, Colors.amber],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.orange.withOpacity(0.3),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.card_giftcard, size: 40, color: Colors.white),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Welcome Bonus',
-                                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                              ),
-                              const Text(
-                                'Claim your \$100,000 bonus!',
-                                style: TextStyle(color: Colors.white, fontSize: 14),
-                              ),
-                            ],
-                          ),
-                        ),
-                        ElevatedButton(
-                          onPressed: _isProcessing ? null : _claimBonus,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.orange,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          ),
-                          child: _isProcessing
-                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('Claim'),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // Expandable Add Money Section
+                _buildBonusSection(),
                 _buildExpandableAddMoney(),
-
                 const SizedBox(height: 8),
                 Expanded(
                   child: Container(
@@ -606,7 +623,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      final walletAmount = widget.amount * 50; // Convert to wallet amount
+      final walletAmount = widget.amount * 50;
       await FirebaseFirestore.instance.collection('add_money').add({
         'userId': widget.userUid,
         'amount': walletAmount,
@@ -638,10 +655,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       'amount': (widget.amount * 100).toInt(),
       'name': 'Wallet Top-up',
       'description': 'Add money to wallet',
-      'prefill': {
-        'contact': '9999999999',
-        'email': 'user@example.com'
-      }
+      'prefill': {'contact': '9999999999', 'email': 'user@example.com'}
     };
 
     try {
@@ -665,10 +679,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget build(BuildContext context) {
     final walletAmount = widget.amount * 50;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Add Money'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Add Money'), centerTitle: true),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -691,19 +702,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 children: [
                   const Icon(Icons.payment, size: 64, color: Colors.blue),
                   const SizedBox(height: 24),
-                  Text(
-                    'Payment Details',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
+                  Text('Payment Details', style: Theme.of(context).textTheme.headlineSmall),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text('Pay Amount:', style: TextStyle(fontSize: 16)),
-                      Text(
-                        '₹${widget.amount.toStringAsFixed(0)}',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
+                      Text('₹${widget.amount.toStringAsFixed(0)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -713,11 +718,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       const Text('Wallet Credit:', style: TextStyle(fontSize: 16)),
                       Text(
                         '\$${walletAmount.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary),
                       ),
                     ],
                   ),
