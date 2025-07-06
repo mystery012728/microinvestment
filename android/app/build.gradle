@@ -34,6 +34,12 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.debug
+
+            // Disable R8 (successor to ProGuard) for release builds
+            minifyEnabled false
+            shrinkResources false
+            // Configure R8/ProGuard rules if minification is enabled
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }
@@ -55,7 +61,7 @@ dependencies {
     implementation 'com.google.android.gms:play-services-auth:21.3.0'
 
     // Kotlin
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.0"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.0"
 
     // MultiDex support
     implementation 'androidx.multidex:multidex:2.0.1'
@@ -63,4 +69,7 @@ dependencies {
     // Required for biometric authentication
     implementation 'androidx.biometric:biometric:1.1.0'
     implementation 'androidx.fragment:fragment:1.6.2'
+
+    // Add ProGuard annotations to fix R8 issues
+    implementation 'com.guardsquare:proguard-annotations:7.4.0'
 }
