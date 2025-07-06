@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/asset.dart';
 import '../services/api_service.dart';
 import '../services/real_time_api_service.dart';
+import '../services/notification_service.dart';
 
 class PortfolioProvider with ChangeNotifier {
   List<Asset> _assets = [];
@@ -220,6 +221,20 @@ class PortfolioProvider with ChangeNotifier {
             'currentPrice': prices[symbol],
             'updatedAt': FieldValue.serverTimestamp(),
           });
+
+          // Check for significant portfolio changes and notify
+          final oldValue = _assets[i].quantity * (_assets[i].currentPrice);
+          final newValue = _assets[i].quantity * prices[symbol]!;
+          final changePercent = oldValue > 0 ? ((newValue - oldValue) / oldValue) * 100 : 0.0;
+
+          if (changePercent.abs() >= 5.0) {
+            await NotificationService().showPortfolioUpdate(
+              symbol: symbol,
+              currentValue: newValue,
+              previousValue: oldValue,
+              changePercent: changePercent,
+            );
+          }
         }
       }
 

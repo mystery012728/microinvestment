@@ -77,6 +77,9 @@ dependencies:
 
   razorpay_flutter: ^1.4.0
 
+  workmanager: ^0.5.2
+  awesome_notifications: ^0.9.3+1
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

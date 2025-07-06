@@ -7,26 +7,101 @@ import '../models/news_article.dart';
 class RealTimeApiService {
   // API Keys - Replace with your actual API keys
   static const String _alphaVantageApiKey = 'SH48TNN10C7SZ182';
-  static const String _finnhubApiKey = 'd1inos1r01qhbuvr5ue0d1inos1r01qhbuvr5ueg';
+  static const List<String> _finnhubApiKeys = [
+    'd1inos1r01qhbuvr5ue0d1inos1r01qhbuvr5ueg',
+    'd1lag6pr01qt4thevlugd1lag6pr01qt4thevlugd1lag6pr01qt4thevlv0',
+    'd1lag6pr01qt4thevlugd1lag6pr01qt4thevlv0',
+  ];
+  static int _currentFinnhubKeyIndex = 0;
+  static const String _itickApiKey = '18849dcb33c54c9bbbcf6fa9db4bf1e78393f321459242298c61398542d2eb38';
   static const String _coinGeckoApiKey = 'YOUR_COINGECKO_API_KEY';
 
   // API Endpoints
   static const String _alphaVantageBaseUrl = 'https://www.alphavantage.co/query';
   static const String _finnhubBaseUrl = 'https://finnhub.io/api/v1';
   static const String _coinGeckoBaseUrl = 'https://api.coingecko.com/api/v3';
+  static const String _itickBaseUrl = 'https://api.itick.com/api';
 
   static final Map<String, StreamController<double>> _priceStreams = {};
   static Timer? _priceUpdateTimer;
   static final Map<String, double> _lastPrices = {};
   static final Map<String, DateTime> _lastApiCall = {};
   static final Map<String, int> _failureCount = {};
-  static const Duration _apiCooldown = Duration(minutes: 1); // Increased cooldown
+  static const Duration _apiCooldown = Duration(seconds: 30); // Reduced cooldown for real-time
   static const int _maxFailures = 3;
 
-  // Initialize real-time connection with longer intervals to avoid rate limits
+  // Get current Finnhub API key and rotate if needed
+  static String _getCurrentFinnhubApiKey() {
+    return _finnhubApiKeys[_currentFinnhubKeyIndex];
+  }
+
+  // Rotate to next Finnhub API key
+  static void _rotateFinnhubApiKey() {
+    _currentFinnhubKeyIndex = (_currentFinnhubKeyIndex + 1) % _finnhubApiKeys.length;
+    print('Rotated to Finnhub API key index: $_currentFinnhubKeyIndex');
+  }
+
+  // Make Finnhub API request with key rotation
+  static Future<http.Response> _makeFinnhubRequest(String endpoint) async {
+    int attempts = 0;
+    const maxAttempts = 3; // Try all keys once
+
+    while (attempts < maxAttempts) {
+      try {
+        final apiKey = _getCurrentFinnhubApiKey();
+        final response = await http.get(
+          Uri.parse('$_finnhubBaseUrl$endpoint&token=$apiKey'),
+          headers: {'Content-Type': 'application/json'},
+        ).timeout(const Duration(seconds: 8));
+
+        // If rate limited (429) or unauthorized (401), try next key
+        if (response.statusCode == 429 || response.statusCode == 401) {
+          print('Finnhub API key rate limited, rotating...');
+          _rotateFinnhubApiKey();
+          attempts++;
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+
+        if (response.statusCode == 200) {
+          return response;
+        }
+
+        throw Exception('HTTP ${response.statusCode}: ${response.body}');
+      } catch (e) {
+        print('Finnhub API request error: $e');
+        attempts++;
+        if (attempts < maxAttempts) {
+          _rotateFinnhubApiKey();
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
+
+    throw Exception('All Finnhub API keys exhausted');
+  }
+
+  // Make iTick API request for Indian stocks
+  static Future<http.Response> _makeItickRequest(String endpoint) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_itickBaseUrl$endpoint'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_itickApiKey',
+        },
+      ).timeout(const Duration(seconds: 8));
+
+      return response;
+    } catch (e) {
+      throw Exception('iTick API request error: $e');
+    }
+  }
+
+  // Initialize real-time connection with shorter intervals for better real-time experience
   static void initializeRealTimeConnection() {
     _priceUpdateTimer?.cancel();
-    _priceUpdateTimer = Timer.periodic(const Duration(minutes: 2), (timer) {
+    _priceUpdateTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       if (_priceStreams.isNotEmpty) {
         _updateAllPrices();
       }
@@ -42,10 +117,8 @@ class RealTimeApiService {
 
     _priceStreams[symbol]!.stream.listen(onPriceUpdate);
 
-    // Immediately provide a mock price to avoid waiting
-    final mockPrice = _getMockPrice(symbol);
-    _lastPrices[symbol] = mockPrice;
-    _priceStreams[symbol]?.add(mockPrice);
+    // Immediately provide a price to avoid waiting
+    _fetchAndUpdatePrice(symbol);
   }
 
   // Unsubscribe from symbol
@@ -55,6 +128,32 @@ class RealTimeApiService {
     _lastPrices.remove(symbol);
     _lastApiCall.remove(symbol);
     _failureCount.remove(symbol);
+  }
+
+  // Fetch and update single price immediately
+  static Future<void> _fetchAndUpdatePrice(String symbol) async {
+    try {
+      double? price;
+
+      if (_isCrypto(symbol)) {
+        price = await _getCryptoPriceWithFallback(symbol);
+      } else if (_isIndianStock(symbol)) {
+        price = await _getIndianStockPriceWithFallback(symbol);
+      } else {
+        price = await _getUSStockPriceWithFallback(symbol);
+      }
+
+      if (price != null) {
+        _lastPrices[symbol] = price;
+        _priceStreams[symbol]?.add(price);
+        _failureCount[symbol] = 0;
+      } else {
+        _handlePriceFailure(symbol);
+      }
+    } catch (e) {
+      print('Price fetch failed for $symbol: $e');
+      _handlePriceFailure(symbol);
+    }
   }
 
   // Update all subscribed prices with better error handling
@@ -74,37 +173,10 @@ class RealTimeApiService {
         continue;
       }
 
-      try {
-        double? price;
+      await _fetchAndUpdatePrice(symbol);
 
-        if (_isCrypto(symbol)) {
-          price = await _getCryptoPriceWithFallback(symbol);
-        } else if (_isIndianStock(symbol)) {
-          price = await _getIndianStockPriceWithFallback(symbol);
-        } else {
-          price = await _getUSStockPriceWithFallback(symbol);
-        }
-
-        if (price != null) {
-          _lastApiCall[symbol] = DateTime.now();
-          _failureCount[symbol] = 0; // Reset failure count on success
-
-          // Only emit if price changed significantly
-          final lastPrice = _lastPrices[symbol];
-          if (lastPrice == null || (price - lastPrice).abs() > lastPrice * 0.005) {
-            _lastPrices[symbol] = price;
-            _priceStreams[symbol]?.add(price);
-          }
-        } else {
-          _handlePriceFailure(symbol);
-        }
-      } catch (e) {
-        print('Price update failed for $symbol: $e');
-        _handlePriceFailure(symbol);
-      }
-
-      // Add delay between API calls to respect rate limits
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Add small delay between API calls
+      await Future.delayed(const Duration(milliseconds: 200));
     }
   }
 
@@ -123,27 +195,66 @@ class RealTimeApiService {
     }
   }
 
-  // Improved US stock price fetching with better fallback
+  // US stock price fetching with Finnhub API rotation
   static Future<double?> _getUSStockPriceWithFallback(String symbol) async {
-    // Try Alpha Vantage first (with validation)
-    if (_isValidApiKey(_alphaVantageApiKey)) {
-      try {
-        return await _getAlphaVantagePrice(symbol);
-      } catch (e) {
-        print('Alpha Vantage failed for $symbol (will try fallback): $e');
+    try {
+      final response = await _makeFinnhubRequest('/quote?symbol=$symbol');
+      final data = json.decode(response.body);
+
+      if (data['c'] != null && data['c'] != 0) {
+        final price = data['c'].toDouble();
+        if (price > 0) {
+          _lastApiCall[symbol] = DateTime.now();
+          return price;
+        }
       }
+    } catch (e) {
+      print('Finnhub failed for $symbol: $e');
+    }
+    return null;
+  }
+
+  // Indian stock price fetching with iTick API
+  static Future<double?> _getIndianStockPriceWithFallback(String symbol) async {
+    try {
+      // Convert symbol to iTick format (e.g., RELIANCE -> RELIANCE.NSE)
+      final itickSymbol = _convertToItickSymbol(symbol);
+      final response = await _makeItickRequest('/quote/$itickSymbol');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        // iTick API response structure may vary, adjust based on actual response
+        final price = data['last_price']?.toDouble() ??
+            data['ltp']?.toDouble() ??
+            data['price']?.toDouble();
+
+        if (price != null && price > 0) {
+          _lastApiCall[symbol] = DateTime.now();
+          return price;
+        }
+      }
+    } catch (e) {
+      print('iTick API failed for $symbol: $e');
+    }
+    return null;
+  }
+
+  // Convert symbol to iTick format
+  static String _convertToItickSymbol(String symbol) {
+    // Most Indian stocks are on NSE, some might be on BSE
+    final nseStocks = [
+      'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'HINDUNILVR',
+      'ITC', 'SBIN', 'BHARTIARTL', 'KOTAKBANK', 'LT', 'HCLTECH',
+      'WIPRO', 'MARUTI', 'ASIANPAINT', 'NESTLEIND', 'BAJFINANCE', 'TITAN'
+    ];
+
+    if (nseStocks.contains(symbol)) {
+      return '$symbol.NSE';
     }
 
-    // Try Finnhub as fallback (with validation)
-    if (_isValidApiKey(_finnhubApiKey)) {
-      try {
-        return await _getFinnhubPrice(symbol);
-      } catch (e) {
-        print('Finnhub failed for $symbol (using mock data): $e');
-      }
-    }
-
-    return null; // Will trigger mock data usage
+    // Default to NSE for unknown symbols
+    return '$symbol.NSE';
   }
 
   static Future<double?> _getCryptoPriceWithFallback(String symbol) async {
@@ -151,7 +262,7 @@ class RealTimeApiService {
       final coinId = _getCoinGeckoId(symbol);
       final url = '$_coinGeckoBaseUrl/simple/price?ids=$coinId&vs_currencies=usd';
 
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -163,62 +274,6 @@ class RealTimeApiService {
       print('CoinGecko failed for $symbol: $e');
     }
     return null;
-  }
-
-  static Future<double?> _getIndianStockPriceWithFallback(String symbol) async {
-    // Indian stock APIs require special handling, using mock for now
-    await Future.delayed(const Duration(milliseconds: 200));
-    return null; // Will use mock data
-  }
-
-  static bool _isValidApiKey(String apiKey) {
-    return apiKey.isNotEmpty &&
-        !apiKey.startsWith('YOUR_') &&
-        apiKey.length > 10;
-  }
-
-  // Get price from Alpha Vantage with better error handling
-  static Future<double> _getAlphaVantagePrice(String symbol) async {
-    final url = '$_alphaVantageBaseUrl?function=GLOBAL_QUOTE&symbol=$symbol&apikey=$_alphaVantageApiKey';
-    final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-
-      // Check for API limit error
-      if (data.containsKey('Note') || data.containsKey('Information')) {
-        throw Exception('API rate limit exceeded');
-      }
-
-      final quote = data['Global Quote'];
-      if (quote != null && quote['05. price'] != null) {
-        final price = double.tryParse(quote['05. price']);
-        if (price != null && price > 0) {
-          return price;
-        }
-      }
-    }
-
-    throw Exception('Invalid response from Alpha Vantage for $symbol');
-  }
-
-  // Get price from Finnhub with better error handling
-  static Future<double> _getFinnhubPrice(String symbol) async {
-    final url = '$_finnhubBaseUrl/quote?symbol=$symbol&token=$_finnhubApiKey';
-    final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-
-      if (data['c'] != null && data['c'] != 0) {
-        final price = data['c'].toDouble();
-        if (price > 0) {
-          return price;
-        }
-      }
-    }
-
-    throw Exception('Invalid response from Finnhub for $symbol');
   }
 
   // Public methods with improved error handling
@@ -237,12 +292,12 @@ class RealTimeApiService {
     return price ?? _getMockPrice(symbol);
   }
 
-  // Get multiple asset prices with better batching
+  // Get multiple asset prices with better batching and API rotation
   static Future<Map<String, double>> getMultipleAssetPrices(List<String> symbols) async {
     final prices = <String, double>{};
 
     // Process in smaller batches to avoid overwhelming APIs
-    const batchSize = 5;
+    const batchSize = 3; // Reduced batch size for better reliability
     for (int i = 0; i < symbols.length; i += batchSize) {
       final batch = symbols.skip(i).take(batchSize).toList();
 
@@ -282,19 +337,26 @@ class RealTimeApiService {
       final mockResults = _getMockSearchResults(query);
       results.addAll(mockResults);
 
-      // Try to enhance with real API data if available
-      if (_isValidApiKey(_alphaVantageApiKey)) {
-        try {
-          final usStocks = await _searchUSStocks(query);
-          // Merge with mock results, avoiding duplicates
-          for (final stock in usStocks) {
-            if (!results.any((r) => r['symbol'] == stock['symbol'])) {
-              results.add(stock);
-            }
+      // Try to enhance with real API data
+      try {
+        final response = await _makeFinnhubRequest('/search?q=$query');
+        final data = json.decode(response.body);
+        final apiResults = data['result'] as List<dynamic>? ?? [];
+
+        // Merge with mock results, avoiding duplicates
+        for (final result in apiResults) {
+          final symbol = result['symbol'] as String;
+          if (!results.any((r) => r['symbol'] == symbol)) {
+            results.add({
+              'symbol': symbol,
+              'name': result['description'] as String,
+              'type': result['type'] == 'Common Stock' ? 'stock' : 'other',
+              'market': 'US',
+            });
           }
-        } catch (e) {
-          print('US stock search failed: $e');
         }
+      } catch (e) {
+        print('US stock search failed: $e');
       }
 
       return results.take(20).toList();
@@ -304,39 +366,7 @@ class RealTimeApiService {
     }
   }
 
-  // Search US stocks with timeout and error handling
-  static Future<List<Map<String, dynamic>>> _searchUSStocks(String query) async {
-    try {
-      final url = '$_alphaVantageBaseUrl?function=SYMBOL_SEARCH&keywords=$query&apikey=$_alphaVantageApiKey';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-
-        // Check for API errors
-        if (data.containsKey('Note') || data.containsKey('Information')) {
-          throw Exception('API rate limit exceeded');
-        }
-
-        final matches = data['bestMatches'] as List<dynamic>? ?? [];
-
-        return matches.take(10).map((match) => {
-          'symbol': match['1. symbol'] ?? '',
-          'name': match['2. name'] ?? '',
-          'type': 'stock',
-          'market': match['4. region'] == 'United States' ? 'NASDAQ' : 'NYSE',
-        }).toList();
-      }
-    } catch (e) {
-      print('Alpha Vantage search error: $e');
-    }
-
-    return [];
-  }
-
-  // Get financial news with better error handling
-
-  // Helper methods (unchanged)
+  // Helper methods
   static bool _isCrypto(String symbol) {
     return ['BTC', 'ETH', 'ADA', 'DOT', 'SOL', 'MATIC', 'AVAX', 'LINK', 'UNI', 'LTC'].contains(symbol);
   }
@@ -369,7 +399,7 @@ class RealTimeApiService {
   static double _getMockPrice(String symbol) {
     final random = Random();
     final now = DateTime.now();
-    final seed = symbol.hashCode + now.hour + now.minute ~/ 10;
+    final seed = symbol.hashCode + now.hour + now.minute ~/ 5; // Update every 5 minutes
     final seededRandom = Random(seed);
 
     double basePrice;
@@ -442,39 +472,6 @@ class RealTimeApiService {
     return prices[symbol] ?? 1.0;
   }
 
-  static List<NewsArticle> _getMockNews() {
-    final now = DateTime.now();
-    return [
-      NewsArticle(
-        id: '1',
-        title: 'Global Markets Show Resilience Amid Economic Uncertainty',
-        description: 'Major indices maintain stability as investors adapt to changing economic conditions.',
-        url: 'https://example.com/news/1',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'Financial Times',
-        publishedAt: now.subtract(const Duration(hours: 1)),
-      ),
-      NewsArticle(
-        id: '2',
-        title: 'Cryptocurrency Market Sees Renewed Interest from Institutions',
-        description: 'Digital assets gain traction as more institutional investors enter the space.',
-        url: 'https://example.com/news/2',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'CoinDesk',
-        publishedAt: now.subtract(const Duration(hours: 3)),
-      ),
-      NewsArticle(
-        id: '3',
-        title: 'Tech Sector Innovation Drives Market Optimism',
-        description: 'Technology companies continue to lead market growth with breakthrough innovations.',
-        url: 'https://example.com/news/3',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'TechCrunch',
-        publishedAt: now.subtract(const Duration(hours: 5)),
-      ),
-    ];
-  }
-
   // Dispose resources
   static void dispose() {
     _priceUpdateTimer?.cancel();
@@ -499,10 +496,29 @@ class RealTimeApiService {
     };
   }
 
-  // Get trending assets
+  // Get trending assets with real API data
   static Future<List<Map<String, dynamic>>> getTrendingAssets() async {
-    await Future.delayed(const Duration(milliseconds: 300));
+    try {
+      // Try to get real trending data from Finnhub
+      final response = await _makeFinnhubRequest('/stock/market-movers?type=active');
+      final data = json.decode(response.body);
 
+      if (data['result'] != null) {
+        final trending = (data['result'] as List).take(5).map((item) => {
+          'symbol': item['symbol'],
+          'name': item['description'] ?? item['symbol'],
+          'change': '${item['change'] >= 0 ? '+' : ''}${item['change'].toStringAsFixed(2)}%',
+        }).toList();
+
+        if (trending.isNotEmpty) {
+          return trending;
+        }
+      }
+    } catch (e) {
+      print('Failed to get trending assets: $e');
+    }
+
+    // Fallback to mock trending data
     return [
       {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'change': '+5.2%'},
       {'symbol': 'BTC', 'name': 'Bitcoin', 'change': '+3.8%'},

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/watchlist_item.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 
 class WatchlistProvider with ChangeNotifier {
   List<WatchlistItem> _items = [];
@@ -140,6 +141,16 @@ class WatchlistProvider with ChangeNotifier {
         );
         notifyListeners();
       }
+
+      // Show confirmation notification
+      if (enabled && alertPrice > 0) {
+        await NotificationService().showPriceAlert(
+          symbol: _items[index].symbol,
+          currentPrice: _items[index].currentPrice,
+          alertPrice: alertPrice,
+          isAbove: alertPrice > _items[index].currentPrice,
+        );
+      }
     } catch (e) {
       print('Error setting price alert: $e');
       throw e;
@@ -181,6 +192,16 @@ class WatchlistProvider with ChangeNotifier {
             'priceChangePercent': priceChangePercent,
             'updatedAt': FieldValue.serverTimestamp(),
           });
+
+          // Check for significant price changes and notify
+          if ((priceChangePercent.abs() >= 5.0) && oldPrice > 0) {
+            await NotificationService().showPortfolioUpdate(
+              symbol: symbol,
+              currentValue: newPrice,
+              previousValue: oldPrice,
+              changePercent: priceChangePercent,
+            );
+          }
         }
       }
 

@@ -62,7 +62,8 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
   @override
   Widget build(BuildContext context) {
     final isPositive = widget.item.priceChange >= 0;
-    final changeColor = isPositive ? AppTheme.primaryGreen : AppTheme.primaryRed;
+    final changeColor =
+        isPositive ? AppTheme.primaryGreen : AppTheme.primaryRed;
 
     return Card(
       child: Column(
@@ -83,16 +84,23 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(widget.item.name),
-                if (widget.item.alertEnabled && widget.item.alertPrice != null) ...[
+                if (widget.item.alertEnabled &&
+                    widget.item.alertPrice != null) ...[
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.notifications_active, size: 14,
+                      Icon(Icons.notifications_active,
+                          size: 14,
                           color: Theme.of(context).colorScheme.primary),
                       const SizedBox(width: 4),
-                      Text('Alert: \$${widget.item.alertPrice!.toStringAsFixed(2)}',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.primary)),
+                      Text(
+                          'Alert: \$${widget.item.alertPrice!.toStringAsFixed(2)}',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                  color:
+                                      Theme.of(context).colorScheme.primary)),
                     ],
                   ),
                 ],
@@ -103,12 +111,21 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text('\$${widget.item.currentPrice.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 2),
-                Text('${isPositive ? '+' : ''}\$${widget.item.priceChange.toStringAsFixed(2)}',
-                    style: TextStyle(color: changeColor, fontWeight: FontWeight.w500, fontSize: 12)),
-                Text('${isPositive ? '+' : ''}${widget.item.priceChangePercent.toStringAsFixed(2)}%',
-                    style: TextStyle(color: changeColor, fontWeight: FontWeight.w500, fontSize: 12)),
+                Text(
+                    '${isPositive ? '+' : ''}\$${widget.item.priceChange.toStringAsFixed(2)}',
+                    style: TextStyle(
+                        color: changeColor,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 12)),
+                Text(
+                    '${isPositive ? '+' : ''}${widget.item.priceChangePercent.toStringAsFixed(2)}%',
+                    style: TextStyle(
+                        color: changeColor,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 12)),
               ],
             ),
             onTap: _toggleExpansion,
@@ -125,7 +142,8 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Price Alert'),
                       value: _alertEnabled,
-                      onChanged: (value) => setState(() => _alertEnabled = value),
+                      onChanged: (value) =>
+                          setState(() => _alertEnabled = value),
                     ),
                     if (_alertEnabled) ...[
                       const SizedBox(height: 8),
@@ -136,7 +154,8 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -148,7 +167,8 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
                             icon: const Icon(Icons.delete, size: 18),
                             label: const Text('Remove'),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: Theme.of(context).colorScheme.error,
+                              foregroundColor:
+                                  Theme.of(context).colorScheme.error,
                             ),
                           ),
                         ),
@@ -156,8 +176,10 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: () {
-                              final alertPrice = _alertEnabled ?
-                              double.tryParse(_alertController.text) ?? 0.0 : 0.0;
+                              final alertPrice = _alertEnabled
+                                  ? double.tryParse(_alertController.text) ??
+                                      0.0
+                                  : 0.0;
                               widget.onSetAlert(alertPrice, _alertEnabled);
                               _toggleExpansion();
                             },
@@ -179,10 +201,14 @@ class _WatchlistItemCardState extends State<WatchlistItemCard>
 
   String _getTypeIcon(String type) {
     switch (type.toLowerCase()) {
-      case 'crypto': return '₿';
-      case 'stock': return '📈';
-      case 'etf': return '📊';
-      default: return '💰';
+      case 'crypto':
+        return '₿';
+      case 'stock':
+        return '📈';
+      case 'etf':
+        return '📊';
+      default:
+        return '💰';
     }
   }
 }
