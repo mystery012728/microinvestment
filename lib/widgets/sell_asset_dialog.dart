@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/asset.dart';
 import '../providers/portfolio_provider.dart';
 import '../providers/auth_provider.dart';
@@ -20,15 +19,16 @@ class SellAssetDialog extends StatefulWidget {
 class _SellAssetDialogState extends State<SellAssetDialog> {
   final _formKey = GlobalKey<FormState>();
   final _quantityController = TextEditingController();
-
   bool _isLoading = false;
   double? _currentPrice;
   bool _sellAll = false;
+  double _walletBalance = 0.0; // Added wallet balance variable
 
   @override
   void initState() {
     super.initState();
     _getCurrentPrice();
+    _loadWalletBalance(); // Added wallet balance loading
   }
 
   @override
@@ -37,14 +37,46 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
     super.dispose();
   }
 
+  // Added wallet balance loading method
+  Future<void> _loadWalletBalance() async {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) return;
+
+    try {
+      final walletDoc = await FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(authProvider.userUid)
+          .get();
+
+      if (walletDoc.exists && mounted) {
+        setState(() {
+          _walletBalance = (walletDoc.data()?['balance'] ?? 0.0).toDouble();
+        });
+      } else if (mounted) {
+        // Create wallet document if it doesn't exist
+        await FirebaseFirestore.instance
+            .collection('wallets')
+            .doc(authProvider.userUid)
+            .set({'balance': 0.0, 'createdAt': FieldValue.serverTimestamp()});
+        setState(() {
+          _walletBalance = 0.0;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _walletBalance = 0.0;
+        });
+      }
+    }
+  }
+
   Future<void> _getCurrentPrice() async {
     setState(() => _isLoading = true);
-
     try {
       final price = widget.asset.type == AssetType.crypto
           ? await RealTimeApiService.getCryptoPrice(widget.asset.symbol)
           : await RealTimeApiService.getUSStockPrice(widget.asset.symbol);
-
       setState(() {
         _currentPrice = price;
         _isLoading = false;
@@ -65,6 +97,34 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
   double get _profitLoss {
     final quantity = double.tryParse(_quantityController.text) ?? 0;
     return _saleAmount - (quantity * widget.asset.buyPrice);
+  }
+
+  // Added wallet balance display widget
+  Widget _buildWalletBalance() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.account_balance_wallet,
+              color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Wallet Balance',
+                  style: Theme.of(context).textTheme.bodyMedium),
+              Text('\$${_walletBalance.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _storeSellDetails(double quantity, double saleAmount, double profitLoss) async {
@@ -90,10 +150,38 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
     final authProvider = context.read<AuthProvider>();
     if (authProvider.userUid == null) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
-    final currentBalance = prefs.getDouble(userWalletKey) ?? 0.0;
-    await prefs.setDouble(userWalletKey, currentBalance + amount);
+    try {
+      // Update wallet balance in Firestore
+      await FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(authProvider.userUid)
+          .update({
+        'balance': FieldValue.increment(amount),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+
+      // Update local state immediately for UI responsiveness
+      if (mounted) {
+        setState(() {
+          _walletBalance += amount;
+        });
+      }
+    } catch (e) {
+      // If wallet document doesn't exist, create it
+      await FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(authProvider.userUid)
+          .set({
+        'balance': amount,
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        setState(() {
+          _walletBalance = amount;
+        });
+      }
+    }
   }
 
   Future<void> _sellAsset() async {
@@ -111,7 +199,6 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
     }
 
     setState(() => _isLoading = true);
-
     try {
       final quantityToSell = double.parse(_quantityController.text);
       final saleAmount = _saleAmount;
@@ -120,7 +207,7 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
       // Store sell details in Firebase
       await _storeSellDetails(quantityToSell, saleAmount, profitLoss);
 
-      // Update wallet balance with sale amount
+      // Update wallet balance with sale amount in Firestore
       await _updateWalletBalance(saleAmount);
 
       if (mounted) {
@@ -129,9 +216,7 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
           quantityToSell,
           _currentPrice!,
         );
-
-        Navigator.of(context).pop();
-
+        Navigator.of(context).pop(true); // Return true to indicate success
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -166,7 +251,7 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 700), // Increased height
         child: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Form(
@@ -204,6 +289,10 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                   ],
                 ),
                 const SizedBox(height: 24),
+
+                // Added Wallet Balance Display
+                _buildWalletBalance(),
+                const SizedBox(height: 16),
 
                 // Current Holdings
                 Container(
@@ -277,6 +366,7 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                   ],
                   enabled: !_sellAll,
+                  onChanged: (value) => setState(() {}), // Added to trigger rebuild
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Please enter quantity to sell';
@@ -331,11 +421,25 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('New Wallet Balance:',
+                                style: Theme.of(context).textTheme.bodyMedium),
+                            Text(
+                              '\$${(_walletBalance + _saleAmount).toStringAsFixed(2)}',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                                color: Colors.green,
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
                 ],
-
                 const SizedBox(height: 24),
 
                 // Buttons

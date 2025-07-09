@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/asset.dart';
 import '../providers/portfolio_provider.dart';
 import '../providers/auth_provider.dart';
@@ -19,7 +18,6 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   final _formKey = GlobalKey<FormState>();
   final _symbolController = TextEditingController();
   final _quantityController = TextEditingController();
-
   AssetType _selectedType = AssetType.stock;
   bool _isLoading = false;
   bool _isSearching = false;
@@ -46,23 +44,72 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     final authProvider = context.read<AuthProvider>();
     if (authProvider.userUid == null) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
-    setState(() {
-      _walletBalance = prefs.getDouble(userWalletKey) ?? 0.0;
-    });
+    try {
+      final walletDoc = await FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(authProvider.userUid)
+          .get();
+
+      if (walletDoc.exists && mounted) {
+        setState(() {
+          _walletBalance = (walletDoc.data()?['balance'] ?? 0.0).toDouble();
+        });
+      } else if (mounted) {
+        // Create wallet document if it doesn't exist
+        await FirebaseFirestore.instance
+            .collection('wallets')
+            .doc(authProvider.userUid)
+            .set({'balance': 0.0, 'createdAt': FieldValue.serverTimestamp()});
+        setState(() {
+          _walletBalance = 0.0;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _walletBalance = 0.0;
+        });
+      }
+    }
   }
 
   Future<void> _updateWalletBalance(double amount) async {
     final authProvider = context.read<AuthProvider>();
     if (authProvider.userUid == null) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
-    setState(() {
-      _walletBalance -= amount;
-    });
-    await prefs.setDouble(userWalletKey, _walletBalance);
+    try {
+      // Update wallet balance in Firestore
+      await FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(authProvider.userUid)
+          .update({
+        'balance': FieldValue.increment(-amount),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+
+      // Update local state immediately for UI responsiveness
+      if (mounted) {
+        setState(() {
+          _walletBalance -= amount;
+        });
+      }
+    } catch (e) {
+      // If wallet document doesn't exist, create it
+      await FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(authProvider.userUid)
+          .set({
+        'balance': -amount,
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        setState(() {
+          _walletBalance = -amount;
+        });
+      }
+    }
   }
 
   double get _totalInvestment {
@@ -491,13 +538,13 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
         'timestamp': FieldValue.serverTimestamp(),
       });
 
-      // Update wallet balance
+      // Update wallet balance in Firestore
       await _updateWalletBalance(_totalInvestment);
 
       // Add to portfolio
       if (mounted) {
         await context.read<PortfolioProvider>().addAsset(asset);
-        Navigator.of(context).pop();
+        Navigator.of(context).pop(true); // Return true to indicate success
         _showSnackBar('${asset.symbol} purchased successfully!', isError: false);
       }
     } catch (e) {

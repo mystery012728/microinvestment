@@ -1,6 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../providers/portfolio_provider.dart';
 import '../providers/auth_provider.dart';
 import '../models/asset.dart';
@@ -14,24 +16,92 @@ import 'wallet_screen.dart';
 
 class PortfolioScreen extends StatefulWidget {
   const PortfolioScreen({super.key});
-  @override State<PortfolioScreen> createState() => _PortfolioScreenState();
+
+  @override
+  State<PortfolioScreen> createState() => _PortfolioScreenState();
 }
 
 class _PortfolioScreenState extends State<PortfolioScreen> {
   double _walletBalance = 0.0;
+  bool _isLoadingWallet = true;
+  StreamSubscription<DocumentSnapshot>? _walletSubscription; // Added for real-time updates
 
   @override
   void initState() {
     super.initState();
     _loadWalletBalance();
+    _setupWalletListener(); // Added real-time listener
+  }
+
+  @override
+  void dispose() {
+    _walletSubscription?.cancel(); // Clean up subscription
+    super.dispose();
+  }
+
+  // Added real-time wallet balance listener
+  void _setupWalletListener() {
+    final authProvider = context.read<AuthProvider>();
+    if (authProvider.userUid == null) return;
+
+    _walletSubscription = FirebaseFirestore.instance
+        .collection('wallets')
+        .doc(authProvider.userUid)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.exists && mounted) {
+        setState(() {
+          _walletBalance = (snapshot.data()?['balance'] ?? 0.0).toDouble();
+          _isLoadingWallet = false;
+        });
+      } else if (mounted) {
+        setState(() {
+          _walletBalance = 0.0;
+          _isLoadingWallet = false;
+        });
+      }
+    });
   }
 
   Future<void> _loadWalletBalance() async {
     final authProvider = context.read<AuthProvider>();
     if (authProvider.userUid == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    final userWalletKey = 'wallet_balance_${authProvider.userUid}';
-    if (mounted) setState(() => _walletBalance = prefs.getDouble(userWalletKey) ?? 0.0);
+
+    try {
+      final walletDoc = await FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(authProvider.userUid)
+          .get();
+
+      if (walletDoc.exists && mounted) {
+        setState(() {
+          _walletBalance = (walletDoc.data()?['balance'] ?? 0.0).toDouble();
+          _isLoadingWallet = false;
+        });
+      } else if (mounted) {
+        setState(() {
+          _walletBalance = 0.0;
+          _isLoadingWallet = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _walletBalance = 0.0;
+          _isLoadingWallet = false;
+        });
+      }
+    }
+  }
+
+  String _formatCurrency(double amount) {
+    if (amount >= 1000000) {
+      return '\$${(amount / 1000000).toStringAsFixed(amount % 1000000 == 0 ? 0 : 1)}M';
+    } else if (amount >= 1000) {
+      return '\$${(amount / 1000).toStringAsFixed(amount % 1000 == 0 ? 0 : 1)}k';
+    } else {
+      return '\$${amount.toStringAsFixed(2)}';
+    }
   }
 
   @override
@@ -87,8 +157,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   }
 
   Widget _buildWalletBalance() => GestureDetector(
-    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen()))
-        .then((_) => _loadWalletBalance()),
+    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletScreen())),
     child: Container(
       margin: const EdgeInsets.only(left: 16, top: 8, bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -114,8 +183,17 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
           Icon(Icons.account_balance_wallet_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 6),
           Flexible(
-            child: Text(
-              '\$${_walletBalance.toStringAsFixed(2)}',
+            child: _isLoadingWallet
+                ? SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+              ),
+            )
+                : Text(
+              _formatCurrency(_walletBalance),
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: Theme.of(context).colorScheme.primary,
                 fontWeight: FontWeight.w700,
@@ -222,8 +300,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   );
 
   void _showAddAssetDialog(BuildContext context) {
-    showDialog(context: context, builder: (_) => const AddAssetDialog())
-        .then((_) => _loadWalletBalance());
+    showDialog(context: context, builder: (_) => const AddAssetDialog());
   }
 
   void _showAssetDetails(BuildContext context, Asset asset) {
@@ -259,7 +336,18 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
 
 class _AssetDetailsSheet extends StatelessWidget {
   final Asset asset;
+
   const _AssetDetailsSheet({required this.asset});
+
+  String _formatCurrency(double amount) {
+    if (amount >= 1000000) {
+      return '\$${(amount / 1000000).toStringAsFixed(amount % 1000000 == 0 ? 0 : 1)}M';
+    } else if (amount >= 1000) {
+      return '\$${(amount / 1000).toStringAsFixed(amount % 1000 == 0 ? 0 : 1)}k';
+    } else {
+      return '\$${amount.toStringAsFixed(2)}';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -289,14 +377,14 @@ class _AssetDetailsSheet extends StatelessWidget {
                 controller: scrollController,
                 padding: const EdgeInsets.all(20),
                 children: [
-                  _buildDetailCard(context, 'Current Value', '\$${asset.totalValue.toStringAsFixed(2)}',
+                  _buildDetailCard(context, 'Current Value', _formatCurrency(asset.totalValue),
                       asset.totalGainLoss >= 0 ? AppTheme.primaryGreen : AppTheme.primaryRed),
                   const SizedBox(height: 16),
-                  _buildDetailCard(context, 'Total Invested', '\$${asset.totalInvested.toStringAsFixed(2)}',
+                  _buildDetailCard(context, 'Total Invested', _formatCurrency(asset.totalInvested),
                       Theme.of(context).colorScheme.onSurface),
                   const SizedBox(height: 16),
                   _buildDetailCard(context, 'Gain/Loss',
-                      '${asset.totalGainLoss >= 0 ? '+' : ''}\$${asset.totalGainLoss.toStringAsFixed(2)} (${asset.totalGainLossPercent.toStringAsFixed(2)}%)',
+                      '${asset.totalGainLoss >= 0 ? '+' : ''}${_formatCurrency(asset.totalGainLoss)} (${asset.totalGainLossPercent.toStringAsFixed(2)}%)',
                       asset.totalGainLoss >= 0 ? AppTheme.primaryGreen : AppTheme.primaryRed),
                   const SizedBox(height: 24),
                   _buildHoldingsCard(context),
@@ -358,8 +446,8 @@ class _AssetDetailsSheet extends StatelessWidget {
         const SizedBox(height: 16),
         ...([
           ('Quantity', '${asset.quantity}'),
-          ('Buy Price', '\$${asset.buyPrice.toStringAsFixed(2)}'),
-          ('Current Price', '\$${asset.currentPrice.toStringAsFixed(2)}'),
+          ('Buy Price', _formatCurrency(asset.buyPrice)),
+          ('Current Price', _formatCurrency(asset.currentPrice)),
           ('Purchase Date', _formatDate(asset.purchaseDate)),
         ].map((item) => _buildInfoRow(context, item.$1, item.$2))),
       ],
