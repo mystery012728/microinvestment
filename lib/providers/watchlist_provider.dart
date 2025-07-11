@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:workmanager/workmanager.dart';
 import '../models/watchlist_item.dart';
-import '../services/api_service.dart';
-import '../services/notification_service.dart';
+import '../services/real_time_api_service.dart' show RealTimeApiService;
 
 class WatchlistProvider with ChangeNotifier {
   List<WatchlistItem> _items = [];
@@ -116,6 +116,7 @@ class WatchlistProvider with ChangeNotifier {
           .delete();
 
       await loadWatchlist();
+      await _manageAlertTask(); // Check if need to stop task
     } catch (e) {
       print('Error removing from watchlist: $e');
       throw e;
@@ -132,7 +133,7 @@ class WatchlistProvider with ChangeNotifier {
           .update({
         'alertPrice': alertPrice,
         'alertEnabled': enabled,
-        'lastAlertTriggered': false, // Reset alert status when setting new alert
+        'lastAlertTriggered': false,
         'lastAlertTime': null,
         'alertTriggeredAt': null,
         'updatedAt': FieldValue.serverTimestamp(),
@@ -148,26 +149,38 @@ class WatchlistProvider with ChangeNotifier {
         notifyListeners();
       }
 
-      // Show confirmation notification
-      if (enabled && alertPrice > 0) {
-        final item = _items[index];
-        final currentPrice = item.currentPrice;
+      // Manage WorkManager task
+      await _manageAlertTask();
 
-        String alertMessage;
-        if (alertPrice > currentPrice) {
-          alertMessage = 'Alert set for ${item.symbol} at \$${alertPrice.toStringAsFixed(2)} (${((alertPrice - currentPrice) / currentPrice * 100).toStringAsFixed(1)}% above current price)';
-        } else if (alertPrice < currentPrice) {
-          alertMessage = 'Alert set for ${item.symbol} at \$${alertPrice.toStringAsFixed(2)} (${((currentPrice - alertPrice) / currentPrice * 100).toStringAsFixed(1)}% below current price)';
-        } else {
-          alertMessage = 'Alert set for ${item.symbol} at current price \$${alertPrice.toStringAsFixed(2)}';
-        }
-
-        // Show a simple confirmation (you can customize this)
-        print(alertMessage);
-      }
     } catch (e) {
       print('Error setting price alert: $e');
       throw e;
+    }
+  }
+
+  // Simple method to start/stop price alert task
+  Future<void> _manageAlertTask() async {
+    try {
+      bool hasActiveAlerts = _items.any((item) => item.alertEnabled);
+
+      if (hasActiveAlerts) {
+        // Start price alert task (15 minutes)
+        await Workmanager().registerPeriodicTask(
+          'priceAlertTask',
+          'priceAlertTask',
+          frequency: const Duration(minutes: 15),
+          constraints: Constraints(
+            networkType: NetworkType.connected,
+          ),
+        );
+        print('Price alert task started');
+      } else {
+        // Stop price alert task
+        await Workmanager().cancelByUniqueName('priceAlertTask');
+        print('Price alert task stopped');
+      }
+    } catch (e) {
+      print('Error managing alert task: $e');
     }
   }
 
@@ -180,7 +193,7 @@ class WatchlistProvider with ChangeNotifier {
 
     try {
       final symbols = _items.map((item) => item.symbol).toList();
-      final prices = await ApiService.getMultipleAssetPrices(symbols);
+      final prices = await RealTimeApiService.getMultipleAssetPrices(symbols);
 
       for (int i = 0; i < _items.length; i++) {
         final symbol = _items[i].symbol;
@@ -206,16 +219,6 @@ class WatchlistProvider with ChangeNotifier {
             'priceChangePercent': priceChangePercent,
             'updatedAt': FieldValue.serverTimestamp(),
           });
-
-          // Check for significant price changes and notify (only for non-alert notifications)
-          if ((priceChangePercent.abs() >= 5.0) && oldPrice > 0) {
-            await NotificationService().showPortfolioUpdate(
-              symbol: symbol,
-              currentValue: newPrice,
-              previousValue: oldPrice,
-              changePercent: priceChangePercent,
-            );
-          }
         }
       }
 

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 import '../providers/watchlist_provider.dart';
 import '../services/real_time_api_service.dart';
 

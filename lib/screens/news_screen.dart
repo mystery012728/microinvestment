@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:awesome_notifications/awesome_notifications.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -27,6 +28,83 @@ class NewsArticle {
   );
 }
 
+class NewsNotificationService {
+  static const String _newsApiKey = '86cf54b70f4341219a3ee9a7779ae2dd';
+
+  static Future<void> initialize() async {
+    await AwesomeNotifications().initialize(
+      'resource://drawable/app_icon',
+      [
+        NotificationChannel(
+          channelKey: 'news_channel',
+          channelName: 'News Notifications',
+          channelDescription: 'Latest financial news updates',
+          defaultColor: Colors.blue,
+          ledColor: Colors.blue,
+          importance: NotificationImportance.High,
+        )
+      ],
+    );
+
+    await AwesomeNotifications().isNotificationAllowed().then((isAllowed) {
+      if (!isAllowed) AwesomeNotifications().requestPermissionToSendNotifications();
+    });
+
+    _schedulePeriodicNotifications();
+  }
+
+  static void _schedulePeriodicNotifications() {
+    AwesomeNotifications().createNotification(
+      content: NotificationContent(
+        id: 1,
+        channelKey: 'news_channel',
+        title: 'Getting latest news...',
+        body: 'Fetching financial updates',
+        notificationLayout: NotificationLayout.Default,
+      ),
+      schedule: NotificationInterval(
+        interval: const Duration(hours: 2), // Fixed: Use Duration instead of int
+        repeats: true,
+      ),
+    );
+  }
+
+  static Future<void> sendNewsNotification() async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://newsapi.org/v2/top-headlines?country=us&category=business&pageSize=1&apiKey=$_newsApiKey'),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final articles = (data['articles'] as List)
+            .map((article) => NewsArticle.fromJson(article))
+            .where((article) => article.title.isNotEmpty)
+            .toList();
+
+        if (articles.isNotEmpty) {
+          final article = articles.first;
+          await AwesomeNotifications().createNotification(
+            content: NotificationContent(
+              id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+              channelKey: 'news_channel',
+              title: '📰 Latest News',
+              body: article.title,
+              bigPicture: article.imageUrl.isNotEmpty ? article.imageUrl : null,
+              notificationLayout: article.imageUrl.isNotEmpty
+                  ? NotificationLayout.BigPicture
+                  : NotificationLayout.Default,
+              payload: {'url': article.url},
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error sending notification: $e');
+    }
+  }
+}
+
 class NewsScreen extends StatefulWidget {
   const NewsScreen({super.key});
   @override State<NewsScreen> createState() => _NewsScreenState();
@@ -44,8 +122,34 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _animationController = AnimationController(duration: const Duration(milliseconds: 300), vsync: this);
+    _initializeNotifications();
     _loadNews();
     _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) => mounted ? _loadNews(showLoader: false) : null);
+  }
+
+  static Future<bool> _onActionReceivedMethod(ReceivedAction receivedAction) async {
+    final url = receivedAction.payload?['url'];
+    if (url != null) {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    }
+    return true;
+  }
+
+  Future<void> _initializeNotifications() async {
+    await NewsNotificationService.initialize();
+
+    // Listen for notification taps
+    AwesomeNotifications().setListeners(
+      onActionReceivedMethod: _onActionReceivedMethod,
+    );
+
+    // Schedule periodic notifications
+    Timer.periodic(const Duration(hours: 2), (_) {
+      NewsNotificationService.sendNewsNotification();
+    });
   }
 
   @override
@@ -80,8 +184,10 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
         throw Exception('Failed to load news: ${response.statusCode}');
       }
     } catch (e) {
-      setState(() => _isLoading = false);
-      setState(() => _error = e.toString());
+      setState(() {
+        _isLoading = false;
+        _error = e.toString();
+      });
     }
   }
 
@@ -100,14 +206,6 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(12),
-                ),
-                child: IconButton(
-                  icon: AnimatedRotation(
-                    turns: _isLoading ? 1 : 0,
-                    duration: const Duration(milliseconds: 1000),
-                    child: const Icon(Icons.refresh_rounded),
-                  ),
-                  onPressed: _isLoading ? null : _loadNews,
                 ),
               ),
             ],
@@ -152,6 +250,11 @@ class _NewsScreenState extends State<NewsScreen> with SingleTickerProviderStateM
       ],
     ),
   );
+
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 }
 
 class _NewsCard extends StatelessWidget {

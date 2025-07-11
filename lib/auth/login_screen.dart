@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:microinvestment/screens/biometric_screen.dart';
 import 'registration_screen.dart';
+import 'forgot_password.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -243,7 +244,30 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                               ),
                             ),
-                            const SizedBox(height: 32),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: _isLoading ? null : () {
+                                  Navigator.push(
+                                    context,
+                                    PageRouteBuilder(
+                                      pageBuilder: (context, animation, _) => const ForgotPasswordScreen(),
+                                      transitionsBuilder: (context, animation, _, child) =>
+                                          FadeTransition(opacity: animation, child: child),
+                                    ),
+                                  );
+                                },
+                                child: Text(
+                                  'Forgot Password?',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.primary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
                             SizedBox(
                               width: double.infinity,
                               height: 52,

@@ -1,12 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../models/asset.dart';
-import '../services/api_service.dart';
 import '../services/real_time_api_service.dart';
-import '../services/notification_service.dart';
 
 class PortfolioProvider with ChangeNotifier {
   List<Asset> _assets = [];
@@ -206,7 +201,7 @@ class PortfolioProvider with ChangeNotifier {
 
     try {
       final symbols = _assets.map((asset) => asset.symbol).toList();
-      final prices = await ApiService.getMultipleAssetPrices(symbols);
+      final prices = await RealTimeApiService.getMultipleAssetPrices(symbols);
 
       for (int i = 0; i < _assets.length; i++) {
         final symbol = _assets[i].symbol;
@@ -226,15 +221,6 @@ class PortfolioProvider with ChangeNotifier {
           final oldValue = _assets[i].quantity * (_assets[i].currentPrice);
           final newValue = _assets[i].quantity * prices[symbol]!;
           final changePercent = oldValue > 0 ? ((newValue - oldValue) / oldValue) * 100 : 0.0;
-
-          if (changePercent.abs() >= 5.0) {
-            await NotificationService().showPortfolioUpdate(
-              symbol: symbol,
-              currentValue: newValue,
-              previousValue: oldValue,
-              changePercent: changePercent,
-            );
-          }
         }
       }
 
