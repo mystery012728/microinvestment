@@ -9,7 +9,6 @@ import '../services/real_time_api_service.dart';
 
 class SellAssetDialog extends StatefulWidget {
   final Asset asset;
-
   const SellAssetDialog({super.key, required this.asset});
 
   @override
@@ -74,6 +73,7 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
   Future<void> _getCurrentPrice() async {
     setState(() => _isLoading = true);
     try {
+      // Re-added crypto-specific price fetching
       final price = widget.asset.type == AssetType.crypto
           ? await RealTimeApiService.getCryptoPrice(widget.asset.symbol)
           : await RealTimeApiService.getUSStockPrice(widget.asset.symbol);
@@ -199,6 +199,7 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
     }
 
     setState(() => _isLoading = true);
+
     try {
       final quantityToSell = double.parse(_quantityController.text);
       final saleAmount = _saleAmount;
@@ -289,11 +290,9 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                   ],
                 ),
                 const SizedBox(height: 24),
-
                 // Added Wallet Balance Display
                 _buildWalletBalance(),
                 const SizedBox(height: 16),
-
                 // Current Holdings
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -335,7 +334,6 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
                 // Sell All Toggle
                 CheckboxListTile(
                   title: const Text('Sell All Holdings'),
@@ -351,7 +349,6 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                   contentPadding: EdgeInsets.zero,
                 ),
                 const SizedBox(height: 8),
-
                 // Quantity to Sell
                 TextFormField(
                   controller: _quantityController,
@@ -381,7 +378,6 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                     return null;
                   },
                 ),
-
                 // Sale Summary
                 if (_currentPrice != null && _quantityController.text.isNotEmpty) ...[
                   const SizedBox(height: 16),
@@ -441,7 +437,6 @@ class _SellAssetDialogState extends State<SellAssetDialog> {
                   ),
                 ],
                 const SizedBox(height: 24),
-
                 // Buttons
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,

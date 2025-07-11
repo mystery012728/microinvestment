@@ -211,13 +211,16 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   }
 
   Widget _buildAssetTypeSelection() {
+    // Re-added crypto to available asset types
+    final availableTypes = AssetType.values.toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Asset Type', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
         SegmentedButton<AssetType>(
-          segments: AssetType.values.map((type) => ButtonSegment<AssetType>(
+          segments: availableTypes.map((type) => ButtonSegment<AssetType>(
             value: type,
             label: Text(type.displayName),
             icon: Text(type.icon),
@@ -414,14 +417,14 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   String _getHintText() {
     switch (_selectedType) {
       case AssetType.stock: return 'e.g., AAPL, RELIANCE';
-      case AssetType.crypto: return 'e.g., BTC, ETH';
+      case AssetType.crypto: return 'e.g., BTC, ETH'; // Re-added crypto hint
       case AssetType.etf: return 'e.g., SPY, QQQ';
     }
   }
 
   String _getTypeIcon(String type) {
     switch (type.toLowerCase()) {
-      case 'crypto': return '₿';
+      case 'crypto': return '₿'; // Re-added crypto icon
       case 'stock': return '📈';
       case 'etf': return '📊';
       default: return '💰';
@@ -450,6 +453,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     }
 
     setState(() => _isSearching = true);
+
     try {
       final results = await RealTimeApiService.searchAssets(query);
       setState(() {
@@ -464,7 +468,8 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   }
 
   bool _isValidAssetType(String type) {
-    return type == _selectedType.name || (_selectedType == AssetType.stock && type == 'etf');
+    // Re-enabled crypto as a valid asset type
+    return type == _selectedType.name || (_selectedType == AssetType.stock && type == 'etf') || (_selectedType == AssetType.crypto && type == 'crypto');
   }
 
   Future<void> _selectAsset(Map<String, dynamic> asset) async {
@@ -490,11 +495,11 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   Future<double> _fetchAssetPrice(Map<String, dynamic> asset) async {
     final symbol = asset['symbol'];
     final market = asset['market'];
-    final type = asset['type'];
+    final type = asset['type']; // Get type from asset map
 
     if (market == 'NSE' || market == 'BSE') {
       return await RealTimeApiService.getIndianStockPrice(symbol);
-    } else if (type == 'crypto') {
+    } else if (type == 'crypto') { // Re-added crypto price fetching
       return await RealTimeApiService.getCryptoPrice(symbol);
     } else {
       return await RealTimeApiService.getUSStockPrice(symbol);
@@ -511,6 +516,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     }
 
     setState(() => _isLoading = true);
+
     try {
       final asset = Asset(
         id: DateTime.now().millisecondsSinceEpoch.toString(),

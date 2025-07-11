@@ -12,18 +12,16 @@ class AddWatchlistDialog extends StatefulWidget {
 
 class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
   final _searchController = TextEditingController();
-
   bool _isSearching = false;
   bool _isLoading = false;
   List<Map<String, dynamic>> _searchResults = [];
   String? _selectedType = 'all';
   String? _error;
   final Map<String, double> _cachedPrices = {};
-
   final List<Map<String, String>> _assetTypes = [
     {'value': 'all', 'label': 'All Assets'},
     {'value': 'stock', 'label': 'Stocks'},
-    {'value': 'crypto', 'label': 'Crypto'},
+    {'value': 'crypto', 'label': 'Crypto'}, // Re-added crypto
     {'value': 'etf', 'label': 'ETFs'},
   ];
 
@@ -41,25 +39,20 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
       });
       return;
     }
-
     setState(() {
       _isSearching = true;
       _error = null;
     });
-
     try {
       final results = await RealTimeApiService.searchAssets(query);
-
       // Filter by selected type
       final filteredResults = _selectedType == 'all'
           ? results
           : results.where((asset) => asset['type'] == _selectedType).toList();
-
       setState(() {
         _searchResults = filteredResults;
         _isSearching = false;
       });
-
       // Fetch prices for search results
       _fetchPricesForResults(filteredResults);
     } catch (e) {
@@ -73,7 +66,6 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
 
   Future<void> _fetchPricesForResults(List<Map<String, dynamic>> results) async {
     final symbols = results.map((asset) => asset['symbol'] as String).toList();
-
     try {
       final prices = await RealTimeApiService.getMultipleAssetPrices(symbols);
       setState(() {
@@ -89,25 +81,21 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
       _isLoading = true;
       _error = null;
     });
-
     try {
       final watchlistProvider = Provider.of<WatchlistProvider>(context, listen: false);
-
       // Get current price
       double currentPrice = _cachedPrices[asset['symbol']] ?? 0.0;
-
       if (currentPrice == 0.0) {
         // Fetch price if not cached
         final symbol = asset['symbol'] as String;
-        if (asset['type'] == 'crypto') {
+        if (asset['type'] == 'crypto') { // Re-added crypto price fetching
           currentPrice = await RealTimeApiService.getCryptoPrice(symbol);
-        } else if (asset['market'] == 'NSE') {
+        } else if (asset['market'] == 'NSE' || asset['market'] == 'BSE') {
           currentPrice = await RealTimeApiService.getIndianStockPrice(symbol);
         } else {
           currentPrice = await RealTimeApiService.getUSStockPrice(symbol);
         }
       }
-
       await watchlistProvider.addToWatchlist(
         asset['symbol'] as String,
         asset['name'] as String,
@@ -115,7 +103,6 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
         currentPrice,
         asset['market'] as String,
       );
-
       if (mounted) {
         Navigator.of(context).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -143,13 +130,12 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
   Widget _buildSearchSuggestions() {
     final suggestions = [
       {'symbol': 'AAPL', 'name': 'Apple Inc.', 'type': 'stock'},
-      {'symbol': 'BTC', 'name': 'Bitcoin', 'type': 'crypto'},
+      {'symbol': 'BTC', 'name': 'Bitcoin', 'type': 'crypto'}, // Re-added BTC
       {'symbol': 'GOOGL', 'name': 'Alphabet Inc.', 'type': 'stock'},
-      {'symbol': 'ETH', 'name': 'Ethereum', 'type': 'crypto'},
+      {'symbol': 'ETH', 'name': 'Ethereum', 'type': 'crypto'}, // Re-added ETH
       {'symbol': 'RELIANCE', 'name': 'Reliance Industries', 'type': 'stock'},
       {'symbol': 'SPY', 'name': 'S&P 500 ETF', 'type': 'etf'},
     ];
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -186,7 +172,6 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
   Widget _buildAssetTile(Map<String, dynamic> asset) {
     final symbol = asset['symbol'] as String;
     final price = _cachedPrices[symbol];
-
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -277,7 +262,7 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
 
   Color _getAssetColor(String? type) {
     switch (type) {
-      case 'crypto':
+      case 'crypto': // Re-added crypto color
         return Colors.orange;
       case 'etf':
         return Colors.purple;
@@ -292,7 +277,6 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
     final screenHeight = MediaQuery.of(context).size.height;
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     final availableHeight = screenHeight - keyboardHeight - 100;
-
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
       child: Container(
@@ -367,12 +351,11 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
                     ],
                   ),
                   const SizedBox(height: 16),
-
                   // Search Bar
                   TextFormField(
                     controller: _searchController,
                     decoration: InputDecoration(
-                      hintText: 'Search assets (e.g., AAPL, Bitcoin, SPY)',
+                      hintText: 'Search assets (e.g., AAPL, Bitcoin, SPY)', // Re-added crypto hint
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _isSearching
                           ? const SizedBox(
@@ -400,9 +383,7 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
                       }
                     },
                   ),
-
                   const SizedBox(height: 12),
-
                   // Asset Type Filter
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -438,7 +419,6 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
                 ],
               ),
             ),
-
             // Scrollable Content
             Expanded(
               child: Padding(
@@ -479,7 +459,6 @@ class _AddWatchlistDialogState extends State<AddWatchlistDialog> {
                         ),
                       ),
                     ],
-
                     // Search Results or Suggestions
                     Expanded(
                       child: _searchResults.isNotEmpty

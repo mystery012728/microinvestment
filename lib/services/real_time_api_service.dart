@@ -113,7 +113,6 @@ class RealTimeApiService {
       } else {
         price = await getUSStockPrice(symbol);
       }
-
       _lastPrices[symbol] = price;
       _priceStreams[symbol]?.add(price);
     } catch (e) {
@@ -136,7 +135,6 @@ class RealTimeApiService {
   // Update all subscribed prices with real-time data
   static Future<void> _updateAllPrices() async {
     final symbols = _priceStreams.keys.toList();
-
     for (final symbol in symbols) {
       // Skip if too many recent failures
       if (_failureCount[symbol]! >= _maxFailures) {
@@ -152,7 +150,6 @@ class RealTimeApiService {
 
       try {
         double? price;
-
         if (_isCrypto(symbol)) {
           price = await _getCryptoPriceWithFallback(symbol);
         } else if (_isIndianStock(symbol)) {
@@ -238,7 +235,6 @@ class RealTimeApiService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-
         // iTick API response structure (adjust based on actual API response)
         if (data['data'] != null && data['data']['price'] != null) {
           final price = data['data']['price'].toDouble();
@@ -246,7 +242,6 @@ class RealTimeApiService {
             return price;
           }
         }
-
         // Alternative response structure
         if (data['price'] != null) {
           final price = data['price'].toDouble();
@@ -254,7 +249,6 @@ class RealTimeApiService {
             return price;
           }
         }
-
         // Another possible structure
         if (data['ltp'] != null) {
           final price = data['ltp'].toDouble();
@@ -299,9 +293,7 @@ class RealTimeApiService {
     try {
       final coinId = _getCoinGeckoId(symbol);
       final url = '$_coinGeckoBaseUrl/simple/price?ids=$coinId&vs_currencies=usd';
-
       final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data[coinId] != null && data[coinId]['usd'] != null) {
@@ -327,7 +319,6 @@ class RealTimeApiService {
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-
       // Check for API limit error
       if (data.containsKey('Note') || data.containsKey('Information')) {
         throw Exception('API rate limit exceeded');
@@ -359,134 +350,6 @@ class RealTimeApiService {
   static Future<double> getCryptoPrice(String symbol) async {
     final price = await _getCryptoPriceWithFallback(symbol);
     return price ?? _getMockPrice(symbol);
-  }
-
-  // NEW: Specific search methods required by AddAssetDialog
-  static Future<List<Map<String, dynamic>>> searchCrypto(String query) async {
-    try {
-      final cryptoResults = _getMockCryptoResults(query);
-      return cryptoResults;
-    } catch (e) {
-      print('Crypto search failed: $e');
-      return [];
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> searchUSStocks(String query) async {
-    try {
-      final results = <Map<String, dynamic>>[];
-
-      // Search US stocks with Finnhub
-      try {
-        final response = await _makeFinnhubApiRequest('/search?q=$query');
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          final searchResults = data['result'] as List?;
-
-          if (searchResults != null) {
-            final usStocks = searchResults.take(10).map((result) => {
-              'symbol': result['symbol'] as String,
-              'name': result['description'] as String,
-              'type': result['type'] == 'Common Stock' ? 'stock' : 'other',
-              'market': 'US',
-            }).toList();
-            results.addAll(usStocks);
-          }
-        }
-      } catch (e) {
-        print('Finnhub search failed: $e');
-      }
-
-      // If no real results, add mock results
-      if (results.isEmpty) {
-        final mockResults = _getMockSearchResults(query);
-        results.addAll(mockResults.where((asset) => asset['market'] == 'NASDAQ' || asset['market'] == 'NYSE'));
-      }
-
-      return results;
-    } catch (e) {
-      print('US stock search failed: $e');
-      return [];
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> searchIndianStocks(String query) async {
-    try {
-      final results = <Map<String, dynamic>>[];
-
-      // Search Indian stocks with iTick
-      try {
-        final url = '$_itickBaseUrl/search?q=$query&apikey=$_itickApiKey';
-        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          if (data['data'] != null) {
-            final indianStocks = (data['data'] as List).take(5).map((result) => {
-              'symbol': result['symbol'] ?? result['tradingsymbol'] ?? '',
-              'name': result['name'] ?? result['company_name'] ?? '',
-              'type': 'stock',
-              'market': 'NSE',
-            }).toList();
-            results.addAll(indianStocks);
-          }
-        }
-      } catch (e) {
-        print('iTick search failed: $e');
-      }
-
-      // If no real results, add mock results
-      if (results.isEmpty) {
-        final mockResults = _getMockSearchResults(query);
-        results.addAll(mockResults.where((asset) => asset['market'] == 'NSE'));
-      }
-
-      return results;
-    } catch (e) {
-      print('Indian stock search failed: $e');
-      return [];
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> searchETFs(String query) async {
-    try {
-      final results = <Map<String, dynamic>>[];
-
-      // Search ETFs with Finnhub
-      try {
-        final response = await _makeFinnhubApiRequest('/search?q=$query');
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          final searchResults = data['result'] as List?;
-
-          if (searchResults != null) {
-            final etfs = searchResults.where((result) =>
-            result['type'] == 'ETF' ||
-                result['description'].toString().toUpperCase().contains('ETF')
-            ).take(10).map((result) => {
-              'symbol': result['symbol'] as String,
-              'name': result['description'] as String,
-              'type': 'etf',
-              'market': 'US',
-            }).toList();
-            results.addAll(etfs);
-          }
-        }
-      } catch (e) {
-        print('Finnhub ETF search failed: $e');
-      }
-
-      // If no real results, add mock ETF results
-      if (results.isEmpty) {
-        final mockETFs = _getMockETFResults(query);
-        results.addAll(mockETFs);
-      }
-
-      return results;
-    } catch (e) {
-      print('ETF search failed: $e');
-      return [];
-    }
   }
 
   // Get multiple asset prices with better batching and real-time data
@@ -539,7 +402,6 @@ class RealTimeApiService {
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
           final searchResults = data['result'] as List?;
-
           if (searchResults != null) {
             final usStocks = searchResults.take(10).map((result) => {
               'symbol': result['symbol'] as String,
@@ -558,7 +420,6 @@ class RealTimeApiService {
       try {
         final url = '$_itickBaseUrl/search?q=$query&apikey=$_itickApiKey';
         final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
-
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
           if (data['data'] != null) {
@@ -576,7 +437,7 @@ class RealTimeApiService {
       }
 
       // Add crypto results
-      final cryptoResults = _getMockCryptoResults(query);
+      final cryptoResults = _getMockCryptoResults(query); // Using mock for search for simplicity
       results.addAll(cryptoResults);
 
       // If no real results, add mock results
@@ -651,9 +512,7 @@ class RealTimeApiService {
     final now = DateTime.now();
     final seed = symbol.hashCode + now.hour + now.minute ~/ 5;
     final seededRandom = Random(seed);
-
     double basePrice;
-
     if (_isCrypto(symbol)) {
       basePrice = _getBasePriceForCrypto(symbol);
       final variation = (seededRandom.nextDouble() - 0.5) * 0.06;
@@ -683,7 +542,6 @@ class RealTimeApiService {
       {'symbol': 'HDFCBANK', 'name': 'HDFC Bank Ltd.', 'type': 'stock', 'market': 'NSE'},
       {'symbol': 'INFY', 'name': 'Infosys Ltd.', 'type': 'stock', 'market': 'NSE'},
     ];
-
     final queryLower = query.toLowerCase();
     return allAssets.where((asset) =>
     asset['symbol']!.toLowerCase().contains(queryLower) ||
@@ -698,13 +556,7 @@ class RealTimeApiService {
       {'symbol': 'SOL', 'name': 'Solana', 'type': 'crypto', 'market': 'Crypto'},
       {'symbol': 'ADA', 'name': 'Cardano', 'type': 'crypto', 'market': 'Crypto'},
       {'symbol': 'DOT', 'name': 'Polkadot', 'type': 'crypto', 'market': 'Crypto'},
-      {'symbol': 'MATIC', 'name': 'Polygon', 'type': 'crypto', 'market': 'Crypto'},
-      {'symbol': 'AVAX', 'name': 'Avalanche', 'type': 'crypto', 'market': 'Crypto'},
-      {'symbol': 'LINK', 'name': 'Chainlink', 'type': 'crypto', 'market': 'Crypto'},
-      {'symbol': 'UNI', 'name': 'Uniswap', 'type': 'crypto', 'market': 'Crypto'},
-      {'symbol': 'LTC', 'name': 'Litecoin', 'type': 'crypto', 'market': 'Crypto'},
     ];
-
     final queryLower = query.toLowerCase();
     return cryptoAssets.where((asset) =>
     asset['symbol']!.toLowerCase().contains(queryLower) ||
@@ -712,240 +564,68 @@ class RealTimeApiService {
     ).toList();
   }
 
-  static List<Map<String, dynamic>> _getMockETFResults(String query) {
-    final etfAssets = [
-      {'symbol': 'SPY', 'name': 'SPDR S&P 500 ETF Trust', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'QQQ', 'name': 'Invesco QQQ Trust', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'VTI', 'name': 'Vanguard Total Stock Market ETF', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'IWM', 'name': 'iShares Russell 2000 ETF', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'EFA', 'name': 'iShares MSCI EAFE ETF', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'GLD', 'name': 'SPDR Gold Trust', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'TLT', 'name': 'iShares 20+ Year Treasury Bond ETF', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'VEA', 'name': 'Vanguard FTSE Developed Markets ETF', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'BND', 'name': 'Vanguard Total Bond Market ETF', 'type': 'etf', 'market': 'US'},
-      {'symbol': 'ARKK', 'name': 'ARK Innovation ETF', 'type': 'etf', 'market': 'US'},
-    ];
-
-    final queryLower = query.toLowerCase();
-    return etfAssets.where((asset) =>
-    asset['symbol']!.toLowerCase().contains(queryLower) ||
-        asset['name']!.toLowerCase().contains(queryLower)
-    ).toList();
-  }
-
-  static double _getBasePriceForCrypto(String symbol) {
-    switch (symbol) {
-      case 'BTC':
-        return 45000.0;
-      case 'ETH':
-        return 3200.0;
-      case 'ADA':
-        return 0.85;
-      case 'DOT':
-        return 28.0;
-      case 'SOL':
-        return 180.0;
-      case 'MATIC':
-        return 1.45;
-      case 'AVAX':
-        return 95.0;
-      case 'LINK':
-        return 18.5;
-      case 'UNI':
-        return 12.0;
-      case 'LTC':
-        return 180.0;
-      default:
-        return 100.0;
-    }
+  static double _getBasePriceForSymbol(String symbol) {
+    final prices = {
+      'AAPL': 185.0, 'GOOGL': 145.0, 'MSFT': 385.0, 'AMZN': 155.0, 'TSLA': 255.0,
+      'NVDA': 850.0, 'META': 325.0, 'NFLX': 455.0, 'JPM': 155.0, 'V': 255.0,
+      'SPY': 455.0, 'QQQ': 385.0, 'VTI': 225.0, 'IWM': 205.0,
+    };
+    return prices[symbol] ?? 100.0;
   }
 
   static double _getBasePriceForIndianStock(String symbol) {
-    switch (symbol) {
-      case 'RELIANCE':
-        return 2450.0;
-      case 'TCS':
-        return 3850.0;
-      case 'HDFCBANK':
-        return 1680.0;
-      case 'INFY':
-        return 1420.0;
-      case 'ICICIBANK':
-        return 950.0;
-      case 'HINDUNILVR':
-        return 2580.0;
-      case 'ITC':
-        return 420.0;
-      case 'SBIN':
-        return 580.0;
-      case 'BHARTIARTL':
-        return 850.0;
-      case 'KOTAKBANK':
-        return 1850.0;
-      case 'LT':
-        return 2850.0;
-      case 'HCLTECH':
-        return 1250.0;
-      case 'WIPRO':
-        return 480.0;
-      case 'MARUTI':
-        return 9800.0;
-      case 'ASIANPAINT':
-        return 3250.0;
-      case 'NESTLEIND':
-        return 21500.0;
-      case 'BAJFINANCE':
-        return 7200.0;
-      case 'TITAN':
-        return 2950.0;
-      default:
-        return 1000.0;
-    }
+    final prices = {
+      'RELIANCE': 2550.0, 'TCS': 3850.0, 'HDFCBANK': 1675.0, 'INFY': 1475.0,
+      'ICICIBANK': 1225.0, 'HINDUNILVR': 2425.0, 'ITC': 465.0, 'SBIN': 765.0,
+      'BHARTIARTL': 1225.0, 'KOTAKBANK': 1825.0, 'LT': 3225.0, 'HCLTECH': 1525.0,
+      'WIPRO': 465.0, 'MARUTI': 10750.0, 'ASIANPAINT': 3225.0, 'NESTLEIND': 2225.0,
+      'BAJFINANCE': 7650.0, 'TITAN': 3425.0,
+    };
+    return prices[symbol] ?? 1000.0;
   }
 
-  static double _getBasePriceForSymbol(String symbol) {
-    switch (symbol) {
-      case 'AAPL':
-        return 175.0;
-      case 'GOOGL':
-        return 140.0;
-      case 'MSFT':
-        return 380.0;
-      case 'AMZN':
-        return 155.0;
-      case 'TSLA':
-        return 250.0;
-      case 'NVDA':
-        return 480.0;
-      case 'META':
-        return 320.0;
-      case 'NFLX':
-        return 420.0;
-      case 'ADBE':
-        return 580.0;
-      case 'CRM':
-        return 280.0;
-      case 'SPY':
-        return 450.0;
-      case 'QQQ':
-        return 380.0;
-      case 'VTI':
-        return 240.0;
-      case 'IWM':
-        return 195.0;
-      case 'EFA':
-        return 78.0;
-      case 'GLD':
-        return 185.0;
-      case 'TLT':
-        return 95.0;
-      case 'VEA':
-        return 52.0;
-      case 'BND':
-        return 78.0;
-      case 'ARKK':
-        return 48.0;
-      default:
-        return 100.0;
-    }
+  static double _getBasePriceForCrypto(String symbol) {
+    final prices = {
+      'BTC': 67500.0, 'ETH': 3650.0, 'ADA': 0.48, 'DOT': 7.8, 'SOL': 185.0,
+      'MATIC': 0.88, 'AVAX': 38.0, 'LINK': 16.5, 'UNI': 9.2, 'LTC': 98.0,
+    };
+    return prices[symbol] ?? 1.0;
   }
 
   static List<NewsArticle> _getMockNews() {
+    final now = DateTime.now();
     return [
       NewsArticle(
         id: '1',
-        title: 'Stock Market Reaches New Heights Amid Economic Recovery',
-        description: 'Major indices continue their upward trajectory as investors show confidence in the economic recovery.',
+        title: 'Global Markets Show Resilience Amid Economic Uncertainty',
+        description: 'Major indices maintain stability as investors adapt to changing economic conditions.',
         url: 'https://example.com/news/1',
         imageUrl: '/placeholder.svg?height=200&width=300',
         source: 'Financial Times',
-        publishedAt: DateTime.now().subtract(const Duration(hours: 2)),
+        publishedAt: now.subtract(const Duration(hours: 1)),
       ),
       NewsArticle(
         id: '2',
-        title: 'Tech Giants Report Strong Quarterly Earnings',
-        description: 'Technology companies exceed expectations with robust revenue growth and positive outlook.',
+        title: 'Cryptocurrency Market Sees Renewed Interest from Institutions',
+        description: 'Digital assets gain traction as more institutional investors enter the space.',
         url: 'https://example.com/news/2',
         imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'Reuters',
-        publishedAt: DateTime.now().subtract(const Duration(hours: 4)),
+        source: 'CoinDesk',
+        publishedAt: now.subtract(const Duration(hours: 3)),
       ),
       NewsArticle(
         id: '3',
-        title: 'Cryptocurrency Market Shows Signs of Stabilization',
-        description: 'Bitcoin and other major cryptocurrencies maintain steady prices after recent volatility.',
+        title: 'Tech Sector Innovation Drives Market Optimism',
+        description: 'Technology companies continue to lead market growth with breakthrough innovations.',
         url: 'https://example.com/news/3',
         imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'CoinDesk',
-        publishedAt: DateTime.now().subtract(const Duration(hours: 6)),
-      ),
-      NewsArticle(
-        id: '4',
-        title: 'Federal Reserve Maintains Current Interest Rates',
-        description: 'Central bank keeps rates unchanged while monitoring inflation and employment data.',
-        url: 'https://example.com/news/4',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'Bloomberg',
-        publishedAt: DateTime.now().subtract(const Duration(hours: 8)),
-      ),
-      NewsArticle(
-        id: '5',
-        title: 'Renewable Energy Stocks Surge on New Policy Announcements',
-        description: 'Clean energy companies see significant gains following government climate initiatives.',
-        url: 'https://example.com/news/5',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'Wall Street Journal',
-        publishedAt: DateTime.now().subtract(const Duration(hours: 12)),
-      ),
-      NewsArticle(
-        id: '6',
-        title: 'Global Supply Chain Improvements Boost Manufacturing Stocks',
-        description: 'Manufacturing sector shows resilience with improved supply chain efficiency.',
-        url: 'https://example.com/news/6',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'MarketWatch',
-        publishedAt: DateTime.now().subtract(const Duration(hours: 16)),
-      ),
-      NewsArticle(
-        id: '7',
-        title: 'Real Estate Market Shows Mixed Signals Across Regions',
-        description: 'Housing markets vary significantly by geography with some areas showing strength.',
-        url: 'https://example.com/news/7',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'CNBC',
-        publishedAt: DateTime.now().subtract(const Duration(hours: 20)),
-      ),
-      NewsArticle(
-        id: '8',
-        title: 'Healthcare Innovations Drive Pharmaceutical Stock Performance',
-        description: 'Medical breakthroughs and new drug approvals support healthcare sector growth.',
-        url: 'https://example.com/news/8',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'Financial News',
-        publishedAt: DateTime.now().subtract(const Duration(days: 1)),
-      ),
-      NewsArticle(
-        id: '9',
-        title: 'Emerging Markets Attract Increased Investment Interest',
-        description: 'International investors show growing confidence in developing economies.',
-        url: 'https://example.com/news/9',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'Economic Times',
-        publishedAt: DateTime.now().subtract(const Duration(days: 1, hours: 6)),
-      ),
-      NewsArticle(
-        id: '10',
-        title: 'Consumer Spending Patterns Shift Toward Digital Services',
-        description: 'E-commerce and digital service providers benefit from changing consumer behavior.',
-        url: 'https://example.com/news/10',
-        imageUrl: '/placeholder.svg?height=200&width=300',
-        source: 'Forbes',
-        publishedAt: DateTime.now().subtract(const Duration(days: 1, hours: 12)),
+        source: 'TechCrunch',
+        publishedAt: now.subtract(const Duration(hours: 5)),
       ),
     ];
   }
 
-  // Clean up resources
+  // Dispose resources
   static void dispose() {
     _priceUpdateTimer?.cancel();
     for (final controller in _priceStreams.values) {
@@ -958,56 +638,42 @@ class RealTimeApiService {
   }
 
   // Get market status
-  static bool isMarketOpen() {
+  static Map<String, dynamic> getMarketStatus() {
     final now = DateTime.now();
-    final dayOfWeek = now.weekday;
     final hour = now.hour;
-
-    // Simple market hours check (9 AM to 4 PM, Monday to Friday)
-    return dayOfWeek >= 1 && dayOfWeek <= 5 && hour >= 9 && hour < 16;
+    return {
+      'isOpen': hour >= 9 && hour < 16,
+      'nextOpen': hour >= 16 ? 'Tomorrow 9:00 AM' : 'Market is open',
+      'timezone': 'EST',
+    };
   }
 
-  // Get price change percentage
-  static double getPriceChangePercentage(double currentPrice, double previousPrice) {
-    if (previousPrice == 0) return 0;
-    return ((currentPrice - previousPrice) / previousPrice) * 100;
-  }
-
-  // Batch price updates for multiple symbols
-  static Future<void> batchUpdatePrices(List<String> symbols) async {
-    final futures = symbols.map((symbol) async {
-      try {
-        double price;
-        if (_isCrypto(symbol)) {
-          price = await getCryptoPrice(symbol);
-        } else if (_isIndianStock(symbol)) {
-          price = await getIndianStockPrice(symbol);
-        } else {
-          price = await getUSStockPrice(symbol);
+  // Get trending assets with real-time data
+  static Future<List<Map<String, dynamic>>> getTrendingAssets() async {
+    try {
+      // Try to get real trending data from Finnhub
+      final response = await _makeFinnhubApiRequest('/stock/market-movers?type=active');
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is List && data.isNotEmpty) {
+          return data.take(5).map((item) => {
+            'symbol': item['symbol'] ?? '',
+            'name': item['description'] ?? item['symbol'] ?? '',
+            'change': '${item['change'] ?? 0 > 0 ? '+' : ''}${(item['change'] ?? 0).toStringAsFixed(2)}%',
+          }).toList();
         }
-
-        _lastPrices[symbol] = price;
-        _priceStreams[symbol]?.add(price);
-      } catch (e) {
-        print('Batch update failed for $symbol: $e');
       }
-    });
+    } catch (e) {
+      print('Error fetching trending assets: $e');
+    }
 
-    await Future.wait(futures);
-  }
-
-  // Get cached price if available
-  static double? getCachedPrice(String symbol) {
-    return _lastPrices[symbol];
-  }
-
-  // Check if symbol is subscribed
-  static bool isSubscribed(String symbol) {
-    return _priceStreams.containsKey(symbol);
-  }
-
-  // Get subscription count
-  static int getSubscriptionCount() {
-    return _priceStreams.length;
+    // Fallback to mock trending data
+    return [
+      {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'change': '+5.2%'},
+      {'symbol': 'BTC', 'name': 'Bitcoin', 'change': '+3.8%'},
+      {'symbol': 'TSLA', 'name': 'Tesla Inc.', 'change': '+2.1%'},
+      {'symbol': 'RELIANCE', 'name': 'Reliance Industries', 'change': '+1.9%'},
+      {'symbol': 'ETH', 'name': 'Ethereum', 'change': '+4.3%'},
+    ];
   }
 }

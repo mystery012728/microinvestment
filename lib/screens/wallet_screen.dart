@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../providers/auth_provider.dart';
@@ -62,36 +61,24 @@ class _WalletScreenState extends State<WalletScreen>
   Future<void> _loadBalance() async {
     if (_currentUserUid == null) return;
     try {
-      // First try to load from Firestore
       final walletDoc =
-          await _firestore.collection('wallets').doc(_currentUserUid).get();
+      await _firestore.collection('wallets').doc(_currentUserUid).get();
       if (walletDoc.exists) {
         final data = walletDoc.data() as Map<String, dynamic>;
         setState(() {
           walletBalance = data['balance']?.toDouble() ?? 0.0;
         });
-        // Update local storage as cache
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setDouble('wallet_balance_$_currentUserUid', walletBalance);
       } else {
-        // If no Firestore document, check local storage for migration
-        final prefs = await SharedPreferences.getInstance();
-        final localBalance =
-            prefs.getDouble('wallet_balance_$_currentUserUid') ?? 0.0;
-        if (localBalance > 0) {
-          // Migrate local balance to Firestore
-          await _saveBalance(localBalance);
-        }
+        // If no Firestore document, initialize balance to 0.0 and create document
+        await _saveBalance(0.0);
         setState(() {
-          walletBalance = localBalance;
+          walletBalance = 0.0;
         });
       }
     } catch (e) {
-      // Fallback to local storage if Firestore fails
-      final prefs = await SharedPreferences.getInstance();
+      _showMessage('Error loading wallet balance: $e', isError: true);
       setState(() {
-        walletBalance =
-            prefs.getDouble('wallet_balance_$_currentUserUid') ?? 0.0;
+        walletBalance = 0.0; // Default to 0.0 on error
       });
     }
   }
@@ -100,39 +87,27 @@ class _WalletScreenState extends State<WalletScreen>
     if (_currentUserUid == null) return;
     final balanceToSave = specificBalance ?? walletBalance;
     try {
-      // Save to Firestore (primary storage)
       await _firestore.collection('wallets').doc(_currentUserUid).set({
         'userId': _currentUserUid,
         'balance': balanceToSave,
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-      // Also save to local storage as cache
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('wallet_balance_$_currentUserUid', balanceToSave);
     } catch (e) {
-      // If Firestore fails, at least save locally
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('wallet_balance_$_currentUserUid', balanceToSave);
-      _showMessage('Balance saved locally. Will sync when online.',
-          isError: true);
+      _showMessage('Failed to save balance to cloud: $e', isError: true);
     }
   }
 
   Future<void> _loadBonusStatus() async {
     if (_currentUserUid == null) return;
     try {
-      // Check in Firestore for bonus claim record
       final bonusDoc = await _firestore
           .collection('bonus_claims')
           .doc(_currentUserUid)
           .get();
-
       setState(() => _bonusClaimed = bonusDoc.exists);
     } catch (e) {
-      // Fallback to SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      setState(() => _bonusClaimed =
-          prefs.getBool('bonus_claimed_$_currentUserUid') ?? false);
+      _showMessage('Error loading bonus status: $e', isError: true);
+      setState(() => _bonusClaimed = false); // Default to false on error
     }
   }
 
@@ -159,9 +134,6 @@ class _WalletScreenState extends State<WalletScreen>
         _bonusClaimed = true;
       });
       await _saveBalance(); // This will now save to Firestore
-      // Update local SharedPreferences as backup
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('bonus_claimed_$_currentUserUid', true);
       await _loadTransactions();
       _showMessage(
           'Bonus claimed successfully! \$${bonusAmount.toStringAsFixed(0)} added to your wallet!');
@@ -174,7 +146,6 @@ class _WalletScreenState extends State<WalletScreen>
 
   Future<void> _loadTransactions() async {
     if (_currentUserUid == null) return;
-
     try {
       final futures = await Future.wait([
         _firestore
@@ -354,9 +325,9 @@ class _WalletScreenState extends State<WalletScreen>
           Text(
             '\$${_getWalletAmount().toStringAsFixed(0)}',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.primary,
-                  fontWeight: FontWeight.bold,
-                ),
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
@@ -380,10 +351,10 @@ class _WalletScreenState extends State<WalletScreen>
           child: ElevatedButton(
             onPressed: _amountController.text.isNotEmpty
                 ? () {
-                    final payAmount =
-                        double.tryParse(_amountController.text) ?? 0.0;
-                    if (payAmount > 0) _navigateToPayment(payAmount);
-                  }
+              final payAmount =
+                  double.tryParse(_amountController.text) ?? 0.0;
+              if (payAmount > 0) _navigateToPayment(payAmount);
+            }
                 : null,
             child: const Text('Pay Now'),
           ),
@@ -443,7 +414,7 @@ class _WalletScreenState extends State<WalletScreen>
                 height: 4,
                 decoration: BoxDecoration(
                   color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
+                  Theme.of(context).colorScheme.onSurface.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -456,12 +427,12 @@ class _WalletScreenState extends State<WalletScreen>
                 child: _transactions.isEmpty
                     ? const Center(child: Text('No transactions yet'))
                     : ListView.builder(
-                        controller: scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: _transactions.length,
-                        itemBuilder: (context, index) =>
-                            _buildTransactionTile(_transactions[index]),
-                      ),
+                  controller: scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _transactions.length,
+                  itemBuilder: (context, index) =>
+                      _buildTransactionTile(_transactions[index]),
+                ),
               ),
             ],
           ),
@@ -472,7 +443,6 @@ class _WalletScreenState extends State<WalletScreen>
 
   Widget _buildBonusSection() {
     if (_bonusClaimed) return const SizedBox();
-
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -520,9 +490,9 @@ class _WalletScreenState extends State<WalletScreen>
             ),
             child: _isProcessing
                 ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Claim'),
           ),
         ],
@@ -538,7 +508,6 @@ class _WalletScreenState extends State<WalletScreen>
           _currentUserUid = authProvider.userUid;
           if (_currentUserUid != null) _loadWalletData();
         }
-
         if (!authProvider.isAuthenticated || _currentUserUid == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Wallet')),
@@ -556,7 +525,6 @@ class _WalletScreenState extends State<WalletScreen>
             ),
           );
         }
-
         return Scaffold(
           appBar: AppBar(
             title: const Text('Wallet'),
@@ -617,8 +585,8 @@ class _WalletScreenState extends State<WalletScreen>
                             .textTheme
                             .headlineLarge
                             ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold),
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -631,7 +599,7 @@ class _WalletScreenState extends State<WalletScreen>
                     decoration: BoxDecoration(
                       color: Theme.of(context).colorScheme.surface,
                       borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(20)),
+                      const BorderRadius.vertical(top: Radius.circular(20)),
                     ),
                     child: Column(
                       children: [
@@ -642,7 +610,7 @@ class _WalletScreenState extends State<WalletScreen>
                             children: [
                               Text('Recent Transactions',
                                   style:
-                                      Theme.of(context).textTheme.titleLarge),
+                                  Theme.of(context).textTheme.titleLarge),
                               TextButton(
                                   onPressed: _showTransactionHistory,
                                   child: const Text('View All')),
@@ -652,38 +620,38 @@ class _WalletScreenState extends State<WalletScreen>
                         Expanded(
                           child: _transactions.isEmpty
                               ? Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.receipt_long,
-                                          size: 64,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurface
-                                              .withOpacity(0.3)),
-                                      const SizedBox(height: 16),
-                                      Text('No transactions yet',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyLarge
-                                              ?.copyWith(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurface
-                                                      .withOpacity(0.7))),
-                                    ],
-                                  ),
-                                )
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.receipt_long,
+                                    size: 64,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.3)),
+                                const SizedBox(height: 16),
+                                Text('No transactions yet',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyLarge
+                                        ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurface
+                                            .withOpacity(0.7))),
+                              ],
+                            ),
+                          )
                               : ListView.builder(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16),
-                                  itemCount: _transactions.length > 5
-                                      ? 5
-                                      : _transactions.length,
-                                  itemBuilder: (context, index) =>
-                                      _buildTransactionTile(
-                                          _transactions[index]),
-                                ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16),
+                            itemCount: _transactions.length > 5
+                                ? 5
+                                : _transactions.length,
+                            itemBuilder: (context, index) =>
+                                _buildTransactionTile(
+                                    _transactions[index]),
+                          ),
                         ),
                       ],
                     ),
@@ -702,7 +670,6 @@ class PaymentScreen extends StatefulWidget {
   final double amount;
   final String userUid;
   final Function(double) onPaymentSuccess;
-
   const PaymentScreen({
     super.key,
     required this.amount,
@@ -742,7 +709,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         'userId': widget.userUid,
         'amount': walletAmount,
         'description':
-            'Money added via Razorpay (₹${widget.amount.toStringAsFixed(0)})',
+        'Money added via Razorpay (₹${widget.amount.toStringAsFixed(0)})',
         'paymentId': response.paymentId,
         'timestamp': FieldValue.serverTimestamp(),
       });
@@ -774,7 +741,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
       'description': 'Add money to wallet',
       'prefill': {'contact': '9999999999', 'email': 'user@example.com'}
     };
-
     try {
       _razorpay.open(options);
     } catch (e) {
@@ -859,7 +825,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       child: _isProcessing
                           ? const CircularProgressIndicator(color: Colors.white)
                           : const Text('Pay Now',
-                              style: TextStyle(fontSize: 18)),
+                          style: TextStyle(fontSize: 18)),
                     ),
                   ),
                 ],
@@ -878,7 +844,6 @@ class WalletTransaction {
   final double amount;
   final String description;
   final DateTime date;
-
   WalletTransaction({
     required this.id,
     required this.type,
@@ -902,11 +867,9 @@ class WalletUtils {
         return data['balance']?.toDouble() ?? 0.0;
       }
     } catch (e) {
-      // Fallback to local storage
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getDouble('wallet_balance_$userUid') ?? 0.0;
+      print('Error getting current balance from Firestore: $e');
     }
-    return 0.0;
+    return 0.0; // Return 0.0 if document doesn't exist or on error
   }
 
   static Future<void> updateBalance(String userUid, double amount) async {
@@ -921,21 +884,18 @@ class WalletUtils {
         final data = walletDoc.data() as Map<String, dynamic>;
         currentBalance = data['balance']?.toDouble() ?? 0.0;
       }
+
       final newBalance = currentBalance + amount;
+
       // Update in Firestore
       await FirebaseFirestore.instance.collection('wallets').doc(userUid).set({
         'userId': userUid,
         'balance': newBalance,
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-      // Update local storage as cache
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('wallet_balance_$userUid', newBalance);
     } catch (e) {
-      // Fallback to local storage
-      final prefs = await SharedPreferences.getInstance();
-      final currentBalance = prefs.getDouble('wallet_balance_$userUid') ?? 0.0;
-      await prefs.setDouble('wallet_balance_$userUid', currentBalance + amount);
+      print('Error updating balance in Firestore: $e');
+      // Consider adding a mechanism to retry or notify user if Firestore update fails
     }
   }
 }
